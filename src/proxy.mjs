@@ -35,8 +35,8 @@ export function routingNotice({ model, effort, confidence, reason }) {
   return `[Jev] routed this turn to ${model} (${detail}${effort ? `, effort auto → ${effort}` : ""}).`;
 }
 
-/** Insert a valid leading text block into a successful SSE response and reindex upstream blocks. */
-export function prependRoutingNotice(notice) {
+/** Prefix the first real text delta so Claude Code's UI renders the decision. */
+export function prependRoutingNotice(notice, onInserted = () => {}) {
   const decoder = new StringDecoder("utf8");
   let pending = "";
   let inserted = false;
@@ -52,18 +52,14 @@ export function prependRoutingNotice(notice) {
         const data = frame.split(/\r?\n/).filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trimStart()).join("\n");
         let parsed;
         try { parsed = JSON.parse(data); } catch { /* Ping and unrecognized frames pass through. */ }
-        if (type === "message_start" && !inserted) {
+        if (type === "content_block_delta" && parsed?.delta?.type === "text_delta" && !inserted) {
           inserted = true;
-          this.push(`${frame}\n\n`);
-          this.push(event("content_block_start", { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }));
-          this.push(event("content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: `${notice}\n` } }));
-          this.push(event("content_block_stop", { type: "content_block_stop", index: 0 }));
+          parsed.delta.text = `${notice}\n${parsed.delta.text ?? ""}`;
+          this.push(event(type, parsed));
+          onInserted();
           continue;
         }
-        if (inserted && type?.startsWith("content_block_") && Number.isInteger(parsed?.index)) {
-          parsed.index++;
-          this.push(event(type, parsed));
-        } else this.push(`${frame}\n\n`);
+        this.push(`${frame}\n\n`);
       }
       callback();
     },
@@ -110,7 +106,9 @@ export function sanitizeSchema(node) {
  */
 export function newTurnPrompt(body) {
   if (!Array.isArray(body?.tools) || body.tools.length === 0) return null; // auxiliary call
-  const last = body?.messages?.[body.messages.length - 1];
+  // Claude Code can append a system message after the user's latest turn.
+  // Skip only trailing system entries; an assistant or tool_result still means continuation.
+  const last = body?.messages?.findLast((message) => message?.role !== "system");
   if (!last || last.role !== "user") return null;
   let text;
   if (typeof last.content === "string") {
@@ -246,6 +244,7 @@ export async function startProxy({ upstreamURL = ANTHROPIC_BASE_URL, route = ask
     req.on("end", async () => {
       let out = Buffer.concat(chunks);
       let notice = null;
+      let routingState = null;
 
       if (/^\/v1\/messages/.test(req.url ?? "")) {
         try {
@@ -269,6 +268,7 @@ export async function startProxy({ upstreamURL = ANTHROPIC_BASE_URL, route = ask
           } else {
             const key = conversationKey(body);
             const state = stateFor(key);
+            routingState = state;
             // What the prompt cache was built on, which is what a downgrade would discard.
             const current = state.tier ?? "opus";
             const prompt = newTurnPrompt(body);
@@ -329,7 +329,8 @@ export async function startProxy({ upstreamURL = ANTHROPIC_BASE_URL, route = ask
               body.output_config ??= {};
               body.output_config.effort = state.effort;
             }
-            if (fresh) notice = routingNotice({ model, effort: state.effort, confidence: fresh.confidence, reason: fresh.reason });
+            if (fresh) state.notice = routingNotice({ model, effort: state.effort, confidence: fresh.confidence, reason: fresh.reason });
+            notice = state.notice;
             // Publish what went out. Claude Code's UI shows the row you picked, not the tier
             // it resolved to, so the status line is the only place this is visible.
             // `claude -p` omits metadata on the first request of a session, so there is no
@@ -353,9 +354,9 @@ export async function startProxy({ upstreamURL = ANTHROPIC_BASE_URL, route = ask
       if (req.method === "GET" && /^\/v1\/models(?:\?|$)/.test(req.url ?? "")) {
         delete headers["accept-encoding"];
       }
-      // Under JEV_DEBUG, ask for an uncompressed stream so the model the API reports can be
-      // read back out of it. Not worth the bandwidth cost in normal operation.
-      if (process.env.JEV_DEBUG) delete headers["accept-encoding"];
+      // A routed turn needs an uncompressed SSE stream to show the decision in its first
+      // text delta. Follow-up requests return to the CLI's normal compression setting.
+      if (process.env.JEV_DEBUG || notice) delete headers["accept-encoding"];
       const upstream = transport.request(
         {
           hostname: target.hostname,
@@ -388,6 +389,8 @@ export async function startProxy({ upstreamURL = ANTHROPIC_BASE_URL, route = ask
           const isStream = /text\/event-stream/i.test(up.headers["content-type"] ?? "");
           const showNotice = notice && up.statusCode >= 200 && up.statusCode < 300 && isStream &&
             !up.headers["content-encoding"];
+          debug(`notice: ${showNotice ? "prepend" : "skip"} status=${up.statusCode} stream=${isStream} ` +
+            `fresh=${Boolean(notice)} encoding=${up.headers["content-encoding"] ?? "none"}`);
           const responseHeaders = showNotice ? { ...up.headers } : up.headers;
           if (showNotice) delete responseHeaders["content-length"];
           res.writeHead(up.statusCode, responseHeaders);
@@ -405,7 +408,7 @@ export async function startProxy({ upstreamURL = ANTHROPIC_BASE_URL, route = ask
             });
           }
           if (showNotice) {
-            up.pipe(prependRoutingNotice(notice)).pipe(res);
+            up.pipe(prependRoutingNotice(notice, () => { routingState.notice = null; })).pipe(res);
           } else up.pipe(res);
         },
       );

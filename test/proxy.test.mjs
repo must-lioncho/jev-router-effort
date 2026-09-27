@@ -190,13 +190,16 @@ test("Claude effort falls back to the client setting and omits effort for Haiku"
   assert.equal(claudeEffort("haiku", "low", "high"), null);
 });
 
-test("routing notice comes first in streaming Claude responses without corrupting tool blocks", async () => {
+test("routing notice prefixes the first real text without corrupting tool blocks", async () => {
   const frame = (type, data) => `event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`;
   const input = [
     frame("message_start", { message: { id: "msg_1" } }),
     frame("content_block_start", { index: 0, content_block: { type: "tool_use", id: "tool_1" } }),
     frame("content_block_delta", { index: 0, delta: { type: "input_json_delta", partial_json: "{}" } }),
     frame("content_block_stop", { index: 0 }),
+    frame("content_block_start", { index: 1, content_block: { type: "text", text: "" } }),
+    frame("content_block_delta", { index: 1, delta: { type: "text_delta", text: "Done." } }),
+    frame("content_block_stop", { index: 1 }),
     frame("message_stop", {}),
   ].join("");
   const stream = prependRoutingNotice("[Jev] routed this turn to claude-sonnet-5 (effort auto → low).");
@@ -211,13 +214,16 @@ test("routing notice comes first in streaming Claude responses without corruptin
     "message_start", "content_block_start", "content_block_delta", "content_block_stop",
     "content_block_start", "content_block_delta", "content_block_stop", "message_stop",
   ]);
-  assert.equal(events[2].delta.text.startsWith("[Jev] routed"), true);
+  assert.equal(events[2].delta.partial_json, "{}");
+  assert.equal(events[5].delta.text, "[Jev] routed this turn to claude-sonnet-5 (effort auto → low).\nDone.");
+  assert.deepEqual(events.slice(1, 4).map((event) => event.index), [0, 0, 0]);
   assert.deepEqual(events.slice(4, 7).map((event) => event.index), [1, 1, 1]);
 });
 
 test("Claude proxy shows the routing decision before the model's first streamed block", async (t) => {
   const frame = (type, data) => `event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`;
   const upstream = http.createServer(async (req, res) => {
+    assert.equal(req.headers["accept-encoding"], undefined, "routed SSE must remain uncompressed");
     for await (const _chunk of req) { /* Drain request. */ }
     res.setHeader("content-type", "text/event-stream");
     res.write(frame("message_start", { message: { id: "msg_1", model: "claude-sonnet-5" } }));
@@ -234,7 +240,7 @@ test("Claude proxy shows the routing decision before the model's first streamed 
   });
   t.after(close);
   const response = await fetch(`http://127.0.0.1:${port}/v1/messages`, {
-    method: "POST", headers: { "content-type": "application/json" },
+    method: "POST", headers: { "content-type": "application/json", "accept-encoding": "gzip, br" },
     body: JSON.stringify({ model: "jev-router", stream: true, tools: [{ name: "Bash" }],
       messages: [{ role: "user", content: "hello" }] }),
   });
@@ -243,8 +249,8 @@ test("Claude proxy shows the routing decision before the model's first streamed 
     .map(([, json]) => JSON.parse(json)).filter((event) => event.type === "content_block_delta");
   assert.equal(response.status, 200);
   assert.match(deltas[0].delta.text, /^\[Jev\] routed this turn to claude-sonnet-5/);
-  assert.equal(deltas[1].delta.text, "Done.");
-  assert.equal(deltas[1].index, 1);
+  assert.match(deltas[0].delta.text, /\nDone\.$/);
+  assert.equal(deltas[0].index, 0);
 });
 
 test("a routed request without metadata is recorded under the conversation key", async (t) => {
@@ -316,6 +322,23 @@ test("survives null and primitive nodes", () => {
 
 test("reads a plain string prompt as a new turn", () => {
   assert.equal(newTurnPrompt(withTools([{ role: "user", content: "fix the bug" }])), "fix the bug");
+});
+
+test("detects a new Claude turn followed by a system message", () => {
+  const body = withTools([
+    { role: "user", content: [{ type: "text", text: "route this" }] },
+    { role: "system", content: [{ type: "text", text: "additional instructions" }] },
+  ]);
+  assert.equal(newTurnPrompt(body), "route this");
+});
+
+test("does not reroute tool results followed by a system message", () => {
+  const body = withTools([
+    { role: "user", content: "route this" },
+    { role: "user", content: [{ type: "tool_result", tool_use_id: "t", content: "done" }] },
+    { role: "system", content: "additional instructions" },
+  ]);
+  assert.equal(newTurnPrompt(body), null);
 });
 
 test("reads a text block prompt as a new turn", () => {
