@@ -32,7 +32,9 @@ export function claudeEffort(tier, recommended, previous) {
 
 export function routingNotice({ model, effort, confidence, reason }) {
   const detail = confidence == null ? reason : `${reason}, confidence ${confidence.toFixed(2)}`;
-  return `[Jev] routed this turn to ${model} (${detail}${effort ? `, effort auto → ${effort}` : ""}).`;
+  const effortDetail = effort ? `effort auto → ${effort}`
+    : tierSpec(tierOf(model))?.effort === false ? "effort n/a" : "effort unset";
+  return `[Jev] routed this turn to ${model} (${detail}, ${effortDetail}).`;
 }
 
 /** Prefix the first real text delta so Claude Code's UI renders the decision. */

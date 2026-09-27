@@ -10,6 +10,7 @@ import {
   sessionOf,
   startProxy,
   claudeEffort,
+  routingNotice,
   prependRoutingNotice,
 } from "../src/proxy.mjs";
 
@@ -188,6 +189,8 @@ test("Claude effort falls back to the client setting and omits effort for Haiku"
   assert.equal(claudeEffort("opus", null, "max"), "max");
   assert.equal(claudeEffort("opus", null, "unsupported"), null);
   assert.equal(claudeEffort("haiku", "low", "high"), null);
+  assert.match(routingNotice({ model: "claude-haiku-4-5-20251001", effort: null, confidence: 0.65, reason: "jev" }), /effort n\/a/);
+  assert.match(routingNotice({ model: "claude-sonnet-5", effort: null, confidence: 0.65, reason: "jev" }), /effort unset/);
 });
 
 test("routing notice prefixes the first real text without corrupting tool blocks", async () => {
