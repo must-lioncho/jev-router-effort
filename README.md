@@ -23,7 +23,8 @@ interface, tools, sessions, permissions, and authentication.
 | `jev-claude` | Claude Code | Existing `claude login` | Status line |
 | `jev-codex` | OpenAI Codex | Existing `codex login` | Commentary line |
 
-Both commands launch the real upstream CLI. Jev only chooses the model for a fresh user turn.
+Both commands launch the real upstream CLI. Jev chooses a model and reasoning effort at the
+start of each user turn.
 
 ## Quick start
 
@@ -82,13 +83,27 @@ For a local checkout, `npm link` installs both commands. Without it, run
 
 ![Jev Router in the Claude Code model picker](docs/model-picker.png)
 
-`jev-claude` launches Claude Code with **Jev Router** selected in `/model`. Selecting another
-model pauses routing; selecting **Jev Router** resumes it.
+`jev-claude` launches Claude Code with **Jev Router (auto model + effort)** selected in `/model`.
+Selecting another model pauses routing; selecting **Jev Router** resumes it. Jev chooses
+`low`, `medium`, or `high` effort for each turn and holds that choice through tool calls.
+Claude Code's built-in effort picker cannot add an `auto` row: the Jev Router model entry is
+the auto switch. Its native effort indicator shows the CLI setting, while Jev's status line
+shows the effort sent to the API.
+
+The first line of a streamed answer shows the decision:
+
+```text
+[Jev] routed this turn to claude-sonnet-5 (jev, confidence 0.91, effort auto → low).
+```
+
+The line appears when the upstream API starts a successful response; routing cannot make a
+slow model response or shell command finish sooner. If Jev fails, the proxy keeps Claude
+Code's current effort setting.
 
 The injected status line shows the model used for the last turn:
 
 ```text
-⚡ haiku p=0.98 · my-project · 8% context
+⚡ haiku · effort auto → low (p=0.98) · my-project · 8% context
 ⏸ manual Opus 4.6 · my-project · 21% context
 ```
 

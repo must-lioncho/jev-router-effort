@@ -37,7 +37,11 @@ jev-claude
 Codex에서는 모델 선택기에서 **Jev Router**를 고르면 매 턴 모델을 선택합니다.
 추론 노력은 기본값 `auto`에서 자동으로 선택하며, 계정의 모델 목록이 지원하는
 단계를 직접 지정할 수도 있습니다. 특정 모델을 직접 고르면 자동 라우팅이 멈춥니다.
-Claude Code에서는 `/model`에서 **Jev Router**를 선택할 수 있습니다.
+Claude Code에서는 `/model`에서 **Jev Router (auto model + effort)**를 선택하면
+Jev가 모델과 추론 노력(`low`·`medium`·`high`)을 함께 고릅니다. 응답 첫 줄과 상태
+표시줄에서 실제 선택 결과를 볼 수 있습니다. Claude Code의 기본 effort 선택 메뉴에는
+외부 프로그램이 `auto` 항목을 추가할 수 없어, `/model`의 Jev Router가 자동 선택
+스위치 역할을 합니다. 기본 effort 표시에는 Claude Code의 설정값이 남을 수 있습니다.
 
 설정과 동작의 전체 설명은 [영어 README](README.md)를 참고하세요. 테스트는 `npm test`로
 실행합니다. 이 버전의 문제는 [이 저장소의 이슈](https://github.com/must-lioncho/jev-router-effort/issues)에,

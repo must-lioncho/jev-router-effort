@@ -2,6 +2,8 @@ import http from "node:http";
 import https from "node:https";
 import { createHash } from "node:crypto";
 import { writeFileSync } from "node:fs";
+import { StringDecoder } from "node:string_decoder";
+import { Transform } from "node:stream";
 import {
   TIERS,
   tierOf,
@@ -17,7 +19,61 @@ import { log } from "./log.mjs";
 import { writeDecision, writeStatus } from "./status.mjs";
 
 const ANTHROPIC_BASE_URL = "https://api.anthropic.com";
+const CLAUDE_EFFORTS = ["low", "medium", "high"];
+const CLAUDE_MANUAL_EFFORTS = [...CLAUDE_EFFORTS, "xhigh", "max"];
 const debug = (line) => process.env.JEV_DEBUG && log(line);
+
+export function claudeEffort(tier, recommended, previous) {
+  if (!tierSpec(tier)?.effort) return null;
+  return CLAUDE_EFFORTS.includes(recommended)
+    ? recommended
+    : CLAUDE_MANUAL_EFFORTS.includes(previous) ? previous : null;
+}
+
+export function routingNotice({ model, effort, confidence, reason }) {
+  const detail = confidence == null ? reason : `${reason}, confidence ${confidence.toFixed(2)}`;
+  return `[Jev] routed this turn to ${model} (${detail}${effort ? `, effort auto → ${effort}` : ""}).`;
+}
+
+/** Insert a valid leading text block into a successful SSE response and reindex upstream blocks. */
+export function prependRoutingNotice(notice) {
+  const decoder = new StringDecoder("utf8");
+  let pending = "";
+  let inserted = false;
+  const event = (type, data) => `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`;
+  return new Transform({
+    transform(chunk, _encoding, callback) {
+      pending += decoder.write(chunk);
+      let boundary;
+      while ((boundary = /\r?\n\r?\n/.exec(pending))) {
+        const frame = pending.slice(0, boundary.index);
+        pending = pending.slice(boundary.index + boundary[0].length);
+        const type = /^event:\s*(.+)$/m.exec(frame)?.[1];
+        const data = frame.split(/\r?\n/).filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trimStart()).join("\n");
+        let parsed;
+        try { parsed = JSON.parse(data); } catch { /* Ping and unrecognized frames pass through. */ }
+        if (type === "message_start" && !inserted) {
+          inserted = true;
+          this.push(`${frame}\n\n`);
+          this.push(event("content_block_start", { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }));
+          this.push(event("content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: `${notice}\n` } }));
+          this.push(event("content_block_stop", { type: "content_block_stop", index: 0 }));
+          continue;
+        }
+        if (inserted && type?.startsWith("content_block_") && Number.isInteger(parsed?.index)) {
+          parsed.index++;
+          this.push(event(type, parsed));
+        } else this.push(`${frame}\n\n`);
+      }
+      callback();
+    },
+    flush(callback) {
+      const remaining = pending + decoder.end();
+      if (remaining) this.push(remaining);
+      callback();
+    },
+  });
+}
 
 /**
  * Claude Code converts draft-04 relics in MCP tool schemas before sending them first-party,
@@ -189,6 +245,7 @@ export async function startProxy({ upstreamURL = ANTHROPIC_BASE_URL, route = ask
     req.on("data", (c) => chunks.push(c));
     req.on("end", async () => {
       let out = Buffer.concat(chunks);
+      let notice = null;
 
       if (/^\/v1\/messages/.test(req.url ?? "")) {
         try {
@@ -224,7 +281,10 @@ export async function startProxy({ upstreamURL = ANTHROPIC_BASE_URL, route = ask
               const available = [...new Set(models.map((model) => model.tier))];
               const currentModel = state.model ?? modelForTier(models, current);
               const contextTokens = Math.round(JSON.stringify(body.messages).length / 4);
-              const jev = await route({ prompt, current: currentModel, contextTokens, models });
+              const jev = await route({
+                prompt, current: currentModel, currentEffort: state.effort ?? body.output_config?.effort,
+                contextTokens, models, efforts: CLAUDE_EFFORTS,
+              });
               const chosen = models.find((model) => model.id === jev?.choice);
               const tierAnswer = jev && { ...jev, choice: chosen?.tier };
               const { tier, reason } = decide({
@@ -242,9 +302,13 @@ export async function startProxy({ upstreamURL = ANTHROPIC_BASE_URL, route = ask
                     : modelForTier(models, tier);
               state.tier = tier;
               state.model = model;
+              state.effort = claudeEffort(tier, jev?.effort, state.effort ?? body.output_config?.effort);
               fresh = {
                 prompt,
                 model,
+                effort: state.effort,
+                effortMode: "auto",
+                effortConfidence: jev?.effortConfidence ?? null,
                 confidence: jev?.confidence ?? null,
                 metrics: jev?.metrics ?? null,
                 reason,
@@ -261,6 +325,11 @@ export async function startProxy({ upstreamURL = ANTHROPIC_BASE_URL, route = ask
             const model = state.model ?? idOf(tier);
             debug(`${key} rewrite ${body.model} -> ${model}`);
             applyTier(body, tier, model);
+            if (state.effort) {
+              body.output_config ??= {};
+              body.output_config.effort = state.effort;
+            }
+            if (fresh) notice = routingNotice({ model, effort: state.effort, confidence: fresh.confidence, reason: fresh.reason });
             // Publish what went out. Claude Code's UI shows the row you picked, not the tier
             // it resolved to, so the status line is the only place this is visible.
             // `claude -p` omits metadata on the first request of a session, so there is no
@@ -316,7 +385,12 @@ export async function startProxy({ upstreamURL = ANTHROPIC_BASE_URL, route = ask
             });
             return;
           }
-          res.writeHead(up.statusCode, up.headers);
+          const isStream = /text\/event-stream/i.test(up.headers["content-type"] ?? "");
+          const showNotice = notice && up.statusCode >= 200 && up.statusCode < 300 && isStream &&
+            !up.headers["content-encoding"];
+          const responseHeaders = showNotice ? { ...up.headers } : up.headers;
+          if (showNotice) delete responseHeaders["content-length"];
+          res.writeHead(up.statusCode, responseHeaders);
           // Report the model the API itself says it used, so the routing can be confirmed
           // from the wire rather than trusted from our own decision log. Claude Code's UI
           // always shows the model it asked for, never the one we rewrote to.
@@ -330,7 +404,9 @@ export async function startProxy({ upstreamURL = ANTHROPIC_BASE_URL, route = ask
               debug(`${up.statusCode} served by ${m[1]}`);
             });
           }
-          up.pipe(res);
+          if (showNotice) {
+            up.pipe(prependRoutingNotice(notice)).pipe(res);
+          } else up.pipe(res);
         },
       );
       upstream.on("error", (e) => {

@@ -22,8 +22,8 @@ const ROOT = dirname(HERE);
 function autoModelEnv() {
   const env = {
     ANTHROPIC_CUSTOM_MODEL_OPTION: AUTO_MODEL,
-    ANTHROPIC_CUSTOM_MODEL_OPTION_NAME: "Jev Router",
-    ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION: "Route each turn to the cheapest model that can do it",
+    ANTHROPIC_CUSTOM_MODEL_OPTION_NAME: "Jev Router (auto model + effort)",
+    ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION: "Choose the model and reasoning effort for each turn",
     ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES:
       "thinking,adaptive_thinking,interleaved_thinking,effort,max_effort",
     // Some Claude Code versions validate the model client-side before it reaches the proxy;

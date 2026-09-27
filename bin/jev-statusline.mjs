@@ -37,7 +37,8 @@ if (status?.manual) {
     status.reason !== "jev/no-change" &&
     !status.reason.includes("override");
   const why = held ? ` ${DIM}(${status.reason.split("/")[0]})${RESET}` : "";
-  routed = `${color}${status.model ?? status.tier}${RESET}${p}${why}`;
+  const effort = status.effort ? ` ${DIM}· effort auto → ${status.effort}${RESET}` : "";
+  routed = `${color}${status.model ?? status.tier}${RESET}${effort}${p}${why}`;
 }
 
 process.stdout.write(`${routed} ${DIM}·${RESET} ${dir} ${DIM}· ${pct}% context${RESET}\n`);

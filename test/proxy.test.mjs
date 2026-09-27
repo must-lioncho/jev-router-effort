@@ -9,6 +9,8 @@ import {
   conversationKey,
   sessionOf,
   startProxy,
+  claudeEffort,
+  prependRoutingNotice,
 } from "../src/proxy.mjs";
 
 test("only the sentinel model is routed", () => {
@@ -143,6 +145,106 @@ test("Claude proxy sends exact account models to Jev and routes the chosen versi
   });
 
   assert.equal(seen[0].model, "claude-opus-4-8");
+});
+
+test("Claude routes effort with the model and pins it across tool continuations", async (t) => {
+  const sent = [];
+  const upstream = http.createServer(async (req, res) => {
+    let raw = "";
+    for await (const chunk of req) raw += chunk;
+    sent.push(JSON.parse(raw));
+    res.setHeader("content-type", "application/json");
+    res.end('{"id":"msg_1","type":"message","model":"claude-sonnet-5"}');
+  });
+  await new Promise((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+  t.after(() => upstream.close());
+  let calls = 0;
+  const { port, close } = await startProxy({
+    upstreamURL: `http://127.0.0.1:${upstream.address().port}`,
+    route: async ({ efforts, currentEffort }) => {
+      calls++;
+      assert.deepEqual(efforts, ["low", "medium", "high"]);
+      assert.equal(currentEffort, "high");
+      return { choice: "claude-sonnet-5", confidence: 0.8, effort: "low", effortConfidence: 0.9 };
+    },
+  });
+  t.after(close);
+  const post = (messages, model = "jev-router") => fetch(`http://127.0.0.1:${port}/v1/messages`, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ model, tools: [{ name: "Bash" }], output_config: { effort: "high" }, messages }),
+  });
+  const first = [{ role: "user", content: "fix this" }];
+  await (await post(first)).text();
+  await (await post([...first, { role: "assistant", content: [{ type: "tool_use", id: "t", name: "Bash" }] },
+    { role: "user", content: [{ type: "tool_result", tool_use_id: "t", content: "done" }] }])).text();
+  await (await post(first, "claude-opus-5")).text();
+  assert.equal(calls, 1);
+  assert.deepEqual(sent.map((body) => body.output_config.effort), ["low", "low", "high"]);
+  assert.deepEqual(sent.map((body) => body.model), ["claude-sonnet-5", "claude-sonnet-5", "claude-opus-5"]);
+});
+
+test("Claude effort falls back to the client setting and omits effort for Haiku", () => {
+  assert.equal(claudeEffort("sonnet", "unknown", "medium"), "medium");
+  assert.equal(claudeEffort("opus", null, "max"), "max");
+  assert.equal(claudeEffort("opus", null, "unsupported"), null);
+  assert.equal(claudeEffort("haiku", "low", "high"), null);
+});
+
+test("routing notice comes first in streaming Claude responses without corrupting tool blocks", async () => {
+  const frame = (type, data) => `event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`;
+  const input = [
+    frame("message_start", { message: { id: "msg_1" } }),
+    frame("content_block_start", { index: 0, content_block: { type: "tool_use", id: "tool_1" } }),
+    frame("content_block_delta", { index: 0, delta: { type: "input_json_delta", partial_json: "{}" } }),
+    frame("content_block_stop", { index: 0 }),
+    frame("message_stop", {}),
+  ].join("");
+  const stream = prependRoutingNotice("[Jev] routed this turn to claude-sonnet-5 (effort auto → low).");
+  const chunks = [];
+  stream.on("data", (chunk) => chunks.push(chunk));
+  stream.write(Buffer.from(input.slice(0, 23)));
+  stream.end(Buffer.from(input.slice(23)));
+  await new Promise((resolve) => stream.on("end", resolve));
+  const events = Buffer.concat(chunks).toString().trim().split(/\n\n/)
+    .map((part) => JSON.parse(part.split("\n").find((line) => line.startsWith("data: ")).slice(6)));
+  assert.deepEqual(events.map((event) => event.type), [
+    "message_start", "content_block_start", "content_block_delta", "content_block_stop",
+    "content_block_start", "content_block_delta", "content_block_stop", "message_stop",
+  ]);
+  assert.equal(events[2].delta.text.startsWith("[Jev] routed"), true);
+  assert.deepEqual(events.slice(4, 7).map((event) => event.index), [1, 1, 1]);
+});
+
+test("Claude proxy shows the routing decision before the model's first streamed block", async (t) => {
+  const frame = (type, data) => `event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`;
+  const upstream = http.createServer(async (req, res) => {
+    for await (const _chunk of req) { /* Drain request. */ }
+    res.setHeader("content-type", "text/event-stream");
+    res.write(frame("message_start", { message: { id: "msg_1", model: "claude-sonnet-5" } }));
+    res.write(frame("content_block_start", { index: 0, content_block: { type: "text", text: "" } }));
+    res.write(frame("content_block_delta", { index: 0, delta: { type: "text_delta", text: "Done." } }));
+    res.write(frame("content_block_stop", { index: 0 }));
+    res.end(frame("message_stop", {}));
+  });
+  await new Promise((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+  t.after(() => upstream.close());
+  const { port, close } = await startProxy({
+    upstreamURL: `http://127.0.0.1:${upstream.address().port}`,
+    route: async () => ({ choice: "claude-sonnet-5", effort: "low", confidence: 0.91 }),
+  });
+  t.after(close);
+  const response = await fetch(`http://127.0.0.1:${port}/v1/messages`, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ model: "jev-router", stream: true, tools: [{ name: "Bash" }],
+      messages: [{ role: "user", content: "hello" }] }),
+  });
+  const data = await response.text();
+  const deltas = [...data.matchAll(/^data: (\{.*\})$/gm)]
+    .map(([, json]) => JSON.parse(json)).filter((event) => event.type === "content_block_delta");
+  assert.equal(response.status, 200);
+  assert.match(deltas[0].delta.text, /^\[Jev\] routed this turn to claude-sonnet-5/);
+  assert.equal(deltas[1].delta.text, "Done.");
+  assert.equal(deltas[1].index, 1);
 });
 
 test("a routed request without metadata is recorded under the conversation key", async (t) => {
