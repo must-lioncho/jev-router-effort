@@ -12,6 +12,12 @@ const CHATGPT_BASE_URL = "https://chatgpt.com/backend-api/codex";
 const API_BASE_URL = "https://api.openai.com/v1";
 export const CODEX_AUTO_MODEL = "jev-router";
 export const CODEX_AUTO_EFFORT = "auto";
+// The native picker also lists client modes such as Ultra (automatic delegation).
+// Those modes are not valid Responses API reasoning.effort values.
+const API_EFFORTS = new Set(["none", "minimal", "low", "medium", "high", "xhigh", "max"]);
+const apiEffortsOf = (model) =>
+  model?.supported_reasoning_levels?.map((level) => level.effort)
+    .filter((effort) => API_EFFORTS.has(effort)) ?? [];
 const DEFAULT_MODELS = {
   haiku: "gpt-5.6-luna",
   sonnet: "gpt-5.6-terra",
@@ -40,19 +46,21 @@ export function codexTierOf(model) {
 export function codexModels(models = new Map()) {
   const available = [...models.values()]
     .filter((model) => model.slug !== CODEX_AUTO_MODEL && model.supported_in_api !== false)
-    .map((model) => ({
-      id: model.slug,
-      tier: codexTierOf(model.slug),
-      description: [
-        model.display_name,
-        model.description,
-        model.context_window && `${model.context_window} context tokens`,
-        model.supported_reasoning_levels?.length &&
-          `supported reasoning efforts: ${model.supported_reasoning_levels.map((level) => level.effort).join(", ")}`,
-      ].filter(Boolean).join("; "),
-      efforts: model.supported_reasoning_levels?.map((level) => level.effort).filter(Boolean) ?? [],
-      defaultEffort: model.default_reasoning_level ?? null,
-    }))
+    .map((model) => {
+      const efforts = apiEffortsOf(model);
+      return {
+        id: model.slug,
+        tier: codexTierOf(model.slug),
+        description: [
+          model.display_name,
+          model.description,
+          model.context_window && `${model.context_window} context tokens`,
+          efforts.length && `supported reasoning efforts: ${efforts.join(", ")}`,
+        ].filter(Boolean).join("; "),
+        efforts,
+        defaultEffort: API_EFFORTS.has(model.default_reasoning_level) ? model.default_reasoning_level : null,
+      };
+    })
     .filter((model) => model.tier);
   return available;
 }
@@ -139,16 +147,21 @@ export function addJevModel(catalog) {
 export function applyCodexTier(body, tier, models = new Map(), model = codexModelOf(tier)) {
   body.model = model;
   const info = models.get(model);
-  const efforts = info?.supported_reasoning_levels?.map((level) => level.effort);
-  if (body.reasoning?.effort && efforts?.length && !efforts.includes(body.reasoning.effort)) {
-    body.reasoning.effort = info.default_reasoning_level;
+  if (body.reasoning?.effort) {
+    const efforts = apiEffortsOf(info);
+    const requested = body.reasoning.effort;
+    const effort = efforts.length
+      ? effortForModel({ efforts, defaultEffort: info.default_reasoning_level }, requested)
+      : API_EFFORTS.has(requested) ? requested : null;
+    if (effort) body.reasoning.effort = effort;
+    else delete body.reasoning.effort;
   }
   return body;
 }
 
-/** Keep Jev's effort only when the selected exact model advertises support for it. */
+/** Keep only API efforts supported by the selected model, never client modes. */
 export function effortForModel(model, requested, fallback) {
-  const efforts = model?.efforts ?? [];
+  const efforts = (model?.efforts ?? []).filter((effort) => API_EFFORTS.has(effort));
   if (requested && efforts.includes(requested)) return requested;
   if (fallback && efforts.includes(fallback)) return fallback;
   if (model?.defaultEffort && efforts.includes(model.defaultEffort)) return model.defaultEffort;

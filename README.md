@@ -189,10 +189,12 @@ Each fresh decision appears as Codex commentary:
 ```
 
 For Codex, reasoning effort defaults to `auto`, which lets Jev choose the lowest sufficient
-effort for each turn. The Jev Router picker also offers the levels from the signed-in account's
-live model catalog, so a user can manually pin `low`, `medium`, `high`, `xhigh`, `max`, or
-`ultra` whenever the catalog advertises them. Tool continuations stay pinned to the model and
-effort selected for that turn.
+API effort supported by the selected model, including `max` when advertised. The native
+picker also offers `ultra` when the account's catalog advertises it. Ultra is a Codex mode
+for automatic task delegation, not an API reasoning effort: Codex enables the mode and
+converts its effort before sending a request. Jev preserves that manual selection but does
+not choose Ultra in `auto` mode or send it as an API effort. Tool continuations stay pinned
+to the model and effort selected for that turn.
 
 `jev-codex` installs or refreshes the packaged `$jev-explain` skill when it starts, so it is
 available from any repository without separate setup.
