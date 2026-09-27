@@ -1,5 +1,11 @@
 # jev-router
 
+[그림으로 보는 모델·effort 자동 선택 (English / 한국어)](https://htmlpreview.github.io/?https://github.com/must-lioncho/jev-router-effort/blob/master/docs/story.html) · [HTML 원본](docs/story.html)
+
+![Codex에서 자동 effort 선택을 초록색으로 강조한 화면](docs/assets/codex-effort-highlight.png)
+
+실제 Codex 화면의 `effort auto → low (0.63)`과 [Claude Code의 모델·effort 선택 화면](docs/assets/claude-routing-evidence.png)을 확인할 수 있습니다. 화면은 라우팅 결과의 증거이며, 속도 비교나 시장 최초 주장의 증거는 아닙니다. [제작 배경과 그림, 다음 계획 보기 →](https://htmlpreview.github.io/?https://github.com/must-lioncho/jev-router-effort/blob/master/docs/story.html)
+
 [English (default)](README.md)
 
 [라우터 Q&A (한국어)](docs/QNA-kr.md) · [Router Q&A (English)](docs/QNA.md)

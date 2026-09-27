@@ -1,5 +1,11 @@
 # jev-router
 
+[Open the illustrated story (English / 한국어)](https://htmlpreview.github.io/?https://github.com/must-lioncho/jev-router-effort/blob/master/docs/story.html) · [HTML source](docs/story.html)
+
+![Codex routing decision with automatic effort selection highlighted](docs/assets/codex-effort-highlight.png)
+
+Codex shows `effort auto → low (0.63)` on a real turn; [Claude Code shows its model and effort decision too](docs/assets/claude-routing-evidence.png). I built this edition to choose both per turn. The screenshots show decisions, not a benchmark or proof of a market-first claim. [Read the story, diagrams, and next steps →](https://htmlpreview.github.io/?https://github.com/must-lioncho/jev-router-effort/blob/master/docs/story.html)
+
 [한국어 안내](README.kr.md)
 
 [Router Q&A (English)](docs/QNA.md) · [라우터 Q&A (한국어)](docs/QNA-kr.md)
