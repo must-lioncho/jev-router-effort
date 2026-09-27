@@ -1,5 +1,19 @@
 # jev-router
 
+[한국어 안내](README.kr.md)
+
+[Router Q&A (English)](docs/QNA.md) · [라우터 Q&A (한국어)](docs/QNA-kr.md)
+
+This repository is a derivative of [gargpratyush/jev-router](https://github.com/gargpratyush/jev-router)
+by the original Jev Router contributors. We maintain this edition as a non-commercial
+project. The MIT license still permits anyone to use, modify, distribute, and fork the
+code, including for commercial purposes. See [LICENSE](LICENSE) for the terms.
+
+This edition adds automatic Codex reasoning-effort selection and exposes the effort levels
+advertised by the signed-in model catalog. It also fixes Codex model-selection errors by
+fetching the account catalog on cold start, filtering incompatible request formats, and
+keeping the chosen model and effort for tool continuations.
+
 Automatic per-turn model routing for Claude Code and OpenAI Codex. Jev sends simple work to
 the fast tier and difficult work to the strong tier, while preserving each CLI's native
 interface, tools, sessions, permissions, and authentication.
@@ -17,7 +31,10 @@ Requires Node.js 20.12+ and at least one supported CLI:
 [Claude Code](https://code.claude.com/docs/en/setup) or
 [OpenAI Codex](https://developers.openai.com/codex/cli).
 
-### 1. npm package
+### 1. Upstream npm package
+
+The npm package `jev-router` belongs to the original project. To run the changes in this
+repository, install from the local repository below.
 
 ```bash
 npm install -g jev-router
@@ -27,8 +44,8 @@ echo "JEV_API_KEY=..." > ~/.jev-router.env
 ### 2. Local repository
 
 ```bash
-git clone https://github.com/gargpratyush/jev-router.git
-cd jev-router
+git clone https://github.com/must-lioncho/jev-router-effort.git
+cd jev-router-effort
 npm install
 npm link
 echo "JEV_API_KEY=..." > ~/.jev-router.env
@@ -147,8 +164,14 @@ concrete model pauses routing; selecting **Jev Router** resumes it.
 Each fresh decision appears as Codex commentary:
 
 ```text
-[Jev] routed this turn to gpt-5.6-sol (jev, confidence 0.91).
+[Jev] routed this turn to gpt-5.6-sol (jev, confidence 0.91, effort high (0.86)).
 ```
+
+For Codex, reasoning effort defaults to `auto`, which lets Jev choose the lowest sufficient
+effort for each turn. The Jev Router picker also offers the levels from the signed-in account's
+live model catalog, so a user can manually pin `low`, `medium`, `high`, `xhigh`, `max`, or
+`ultra` whenever the catalog advertises them. Tool continuations stay pinned to the model and
+effort selected for that turn.
 
 `jev-codex` installs or refreshes the packaged `$jev-explain` skill when it starts, so it is
 available from any repository without separate setup.
@@ -260,21 +283,13 @@ injection, and decision display.
 
 ## Contributing
 
-Issues and pull requests are welcome. Use [Issues](https://github.com/gargpratyush/jev-router/issues)
-to report bugs, request improvements, or ask questions. Include the relevant Claude Code or
-Codex version, reproduction steps, expected behavior, and useful logs with secrets removed.
-
-For a pull request:
-
-1. Open an issue first - all PRs by contributors should be linked with an approved issue. Explain the problem and validation in the issue description.
-2. Fork the repository and create a focused branch from `master`.
-3. Make the smallest change that solves the problem.
-4. Run `npm test` and include tests for non-trivial behavior changes.
-5. Claude/Copilot/Codex shall not be the contributors. 
-
-Please do not commit API keys or other secrets. All contributions require review, and only the
-repository owner can merge pull requests.
+Report issues and propose changes in [this edition's issue tracker](https://github.com/must-lioncho/jev-router-effort/issues).
+Include your CLI version, steps to reproduce, and logs with secrets removed. Run `npm test`
+before opening a pull request. For changes to the original project, use the
+[upstream issue tracker](https://github.com/gargpratyush/jev-router/issues).
 
 ## License
 
-MIT
+[MIT](LICENSE). This edition is maintained for non-commercial purposes, but the license
+does not restrict commercial use. Keep the original copyright and license notice when
+redistributing the code.

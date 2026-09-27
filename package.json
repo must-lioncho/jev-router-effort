@@ -5,10 +5,10 @@
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/gargpratyush/jev-router.git"
+    "url": "git+https://github.com/must-lioncho/jev-router-effort.git"
   },
-  "homepage": "https://github.com/gargpratyush/jev-router#readme",
-  "bugs": "https://github.com/gargpratyush/jev-router/issues",
+  "homepage": "https://github.com/must-lioncho/jev-router-effort#readme",
+  "bugs": "https://github.com/must-lioncho/jev-router-effort/issues",
   "bin": {
     "jev-claude": "bin/jev-claude.mjs",
     "jev-codex": "bin/jev-codex.mjs",

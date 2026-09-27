@@ -11,6 +11,7 @@ import { writeDecision, writeStatus } from "./status.mjs";
 const CHATGPT_BASE_URL = "https://chatgpt.com/backend-api/codex";
 const API_BASE_URL = "https://api.openai.com/v1";
 export const CODEX_AUTO_MODEL = "jev-router";
+export const CODEX_AUTO_EFFORT = "auto";
 const DEFAULT_MODELS = {
   haiku: "gpt-5.6-luna",
   sonnet: "gpt-5.6-terra",
@@ -35,7 +36,7 @@ export function codexTierOf(model) {
   return /^gpt-/i.test(model ?? "") ? "sonnet" : null;
 }
 
-/** Exact GPT models in Codex's account catalog; configured ids are the cold-start fallback. */
+/** Only models reported by the account are eligible, including on cold start. */
 export function codexModels(models = new Map()) {
   const available = [...models.values()]
     .filter((model) => model.slug !== CODEX_AUTO_MODEL && model.supported_in_api !== false)
@@ -46,20 +47,18 @@ export function codexModels(models = new Map()) {
         model.display_name,
         model.description,
         model.context_window && `${model.context_window} context tokens`,
+        model.supported_reasoning_levels?.length &&
+          `supported reasoning efforts: ${model.supported_reasoning_levels.map((level) => level.effort).join(", ")}`,
       ].filter(Boolean).join("; "),
+      efforts: model.supported_reasoning_levels?.map((level) => level.effort).filter(Boolean) ?? [],
+      defaultEffort: model.default_reasoning_level ?? null,
     }))
     .filter((model) => model.tier);
-  return available.length
-    ? available
-    : Object.keys(DEFAULT_MODELS).map((tier) => ({
-        id: codexModelOf(tier),
-        tier,
-        description: codexModelOf(tier),
-      }));
+  return available;
 }
 
 const modelForTier = (models, tier) =>
-  models.find((model) => model.tier === tier)?.id ?? codexModelOf(tier);
+  models.find((model) => model.tier === tier)?.id ?? models[0]?.id;
 
 const textOf = (content) => {
   if (typeof content === "string") return content;
@@ -110,6 +109,15 @@ export function addJevModel(catalog) {
     catalog.models.find((model) => model.visibility === "list") ??
     catalog.models[0];
   if (!template) return catalog;
+  const effortLevels = [];
+  const seenEfforts = new Set();
+  for (const model of catalog.models) {
+    for (const level of model.supported_reasoning_levels ?? []) {
+      if (!level?.effort || seenEfforts.has(level.effort)) continue;
+      seenEfforts.add(level.effort);
+      effortLevels.push(level);
+    }
+  }
   catalog.models.unshift({
     ...template,
     slug: CODEX_AUTO_MODEL,
@@ -119,6 +127,11 @@ export function addJevModel(catalog) {
     supported_in_api: true,
     priority: 0,
     upgrade: null,
+    default_reasoning_level: CODEX_AUTO_EFFORT,
+    supported_reasoning_levels: [
+      { effort: CODEX_AUTO_EFFORT, description: "Jev chooses the reasoning effort for each turn." },
+      ...effortLevels,
+    ],
   });
   return catalog;
 }
@@ -133,6 +146,15 @@ export function applyCodexTier(body, tier, models = new Map(), model = codexMode
   return body;
 }
 
+/** Keep Jev's effort only when the selected exact model advertises support for it. */
+export function effortForModel(model, requested, fallback) {
+  const efforts = model?.efforts ?? [];
+  if (requested && efforts.includes(requested)) return requested;
+  if (fallback && efforts.includes(fallback)) return fallback;
+  if (model?.defaultEffort && efforts.includes(model.defaultEffort)) return model.defaultEffort;
+  return efforts[0] ?? null;
+}
+
 export const upstreamFor = (
   headers,
   path = "",
@@ -140,12 +162,17 @@ export const upstreamFor = (
   apiBaseURL = API_BASE_URL,
 ) => /\/models(?:\?|$)/.test(path) || headers["chatgpt-account-id"] ? chatgptBaseURL : apiBaseURL;
 
-export function jevDecisionEvents({ tier, model = codexModelOf(tier), confidence, reason }) {
+export function jevDecisionEvents({ tier, model = codexModelOf(tier), effort, effortMode, confidence, effortConfidence, reason }) {
   const detail = confidence == null ? reason : `${reason}, confidence ${confidence.toFixed(2)}`;
+  const effortDetail = effort
+    ? effortMode === CODEX_AUTO_EFFORT
+      ? `, effort auto → ${effort}${effortConfidence == null ? "" : ` (${effortConfidence.toFixed(2)})`}`
+      : `, effort ${effort} (manual)`
+    : "";
   const id = `jev-${randomUUID()}`;
   const text = reason.startsWith("jev-unavailable")
     ? `[Jev] unavailable; using ${model}. Add JEV_API_KEY=... to ~/.jev-router.env and restart jev-codex.`
-    : `[Jev] routed this turn to ${model} (${detail}).`;
+    : `[Jev] routed this turn to ${model} (${detail}${effortDetail}).`;
   const item = {
     type: "message",
     role: "assistant",
@@ -186,20 +213,52 @@ export async function startCodexProxy({
             writeFileSync(`${process.env.JEV_DUMP}.${Date.now()}.json`, JSON.stringify(body, null, 2));
           }
           if (body.model === CODEX_AUTO_MODEL) {
+            // Codex may reuse its own catalog cache and never GET /models through us.
+            // Fetch with this request's account credentials instead of inventing ids.
+            if (!models.size) {
+              const headers = { ...req.headers };
+              for (const name of ["host", "content-length", "connection", "content-type", "accept-encoding"]) delete headers[name];
+              const clientVersion = req.headers["version"] ?? /codex[^/]*\/([\d.]+)/i.exec(req.headers["user-agent"] ?? "")?.[1] ?? "0.157.1";
+              const response = await fetch(`${chatgptBaseURL}/models?client_version=${encodeURIComponent(clientVersion)}`, {
+                headers, signal: AbortSignal.timeout(15000),
+              });
+              if (!response.ok) throw new Error(`Model catalog HTTP ${response.status}`);
+              const catalog = await response.json();
+              if (!Array.isArray(catalog.models)) throw new Error("Invalid model catalog");
+              for (const info of catalog.models) models.set(info.slug, info);
+            }
             const key = codexConversationKey(body);
             const candidates = codexModels(models).filter((model) =>
-              availableTiers().includes(model.tier),
+              availableTiers().includes(model.tier) &&
+              // Keep the CLI's wire format: Lite bodies cannot safely be sent
+              // to legacy models merely by removing the protocol header.
+              (req.headers["x-openai-internal-codex-responses-lite"] === undefined ||
+                models.get(model.id)?.use_responses_lite === true),
             );
             const available = [...new Set(candidates.map((model) => model.tier))];
-            const currentModel = states.get(key)?.model ?? modelForTier(candidates, "opus");
+            if (!candidates.length) throw new Error("No account models available for routing");
+            const previousModel = states.get(key)?.model;
+            const currentModel = candidates.some((model) => model.id === previousModel)
+              ? previousModel : modelForTier(candidates, "opus");
             const current = codexTierOf(currentModel) ?? "opus";
             const prompt = codexNewTurnPrompt(body);
             const explaining = prompt?.includes("<jev-explain>") || /^\$jev-explain\b/i.test(prompt ?? "");
             let tier = current;
             let model = currentModel;
+            const requestedEffort = body.reasoning?.effort ?? CODEX_AUTO_EFFORT;
+            const effortMode = requestedEffort === CODEX_AUTO_EFFORT ? CODEX_AUTO_EFFORT : "manual";
+            let effort = effortMode === "manual" ? requestedEffort : states.get(key)?.effort ?? null;
             if (prompt && !explaining) {
               const contextTokens = Math.round(JSON.stringify(body.input).length / 4);
-              const jev = await route({ prompt, current: currentModel, contextTokens, models: candidates });
+              const efforts = [...new Set(candidates.flatMap((candidate) => candidate.efforts))];
+              const jev = await route({
+                prompt,
+                current: currentModel,
+                currentEffort: effort,
+                contextTokens,
+                models: candidates,
+                efforts: effortMode === CODEX_AUTO_EFFORT ? efforts : [],
+              });
               const chosen = candidates.find((candidate) => candidate.id === jev?.choice);
               const decision = decide({
                 prompt,
@@ -215,12 +274,21 @@ export async function startCodexProxy({
                   : tier === current
                     ? currentModel
                     : modelForTier(candidates, tier);
-              states.set(key, { tier, model });
+              const selected = candidates.find((candidate) => candidate.id === model);
+              effort = effortForModel(
+                selected,
+                effortMode === CODEX_AUTO_EFFORT ? jev?.effort : requestedEffort,
+                effort,
+              );
+              states.set(key, { tier, model, effort, effortMode });
               routing = {
                 prompt,
                 tier,
                 model,
+                effort,
+                effortMode,
                 confidence: jev?.confidence ?? null,
+                effortConfidence: effortMode === CODEX_AUTO_EFFORT ? jev?.effortConfidence ?? null : null,
                 metrics: jev?.metrics ?? null,
                 reason: decision.reason,
                 jev: jev ? { request: jev.request, response: jev.response } : null,
@@ -228,6 +296,10 @@ export async function startCodexProxy({
               };
               writeDecision(statusId, routing);
               debug(`${key} ${current} -> ${tier} (${decision.reason}) | ${prompt.slice(0, 60)}`);
+            }
+            if (effort) {
+              body.reasoning ??= {};
+              body.reasoning.effort = effort;
             }
             applyCodexTier(body, tier, models, model);
           } else {
@@ -237,7 +309,9 @@ export async function startCodexProxy({
           }
           out = Buffer.from(JSON.stringify(body));
         } catch (err) {
-          debug(`codex passthrough, could not process body: ${err.message}`);
+          res.writeHead(503, { "content-type": "application/json" });
+          res.end(JSON.stringify({ error: { message: `Jev routing failed: ${err.message}`, type: "routing_error" } }));
+          return;
         }
       }
 
@@ -264,6 +338,7 @@ export async function startCodexProxy({
               let data = Buffer.concat(body);
               try {
                 const catalog = addJevModel(JSON.parse(data.toString()));
+                models.clear();
                 for (const model of catalog.models) models.set(model.slug, model);
                 data = Buffer.from(JSON.stringify(catalog));
                 delete responseHeaders["content-length"];

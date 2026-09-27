@@ -27,7 +27,8 @@ export function formatExplanation(status) {
 
   const m = status.metrics ?? {};
   const request = status.jev?.request?.state;
-  const recommendation = status.jev?.response?.answers?.model_tier?.choice ?? status.tier ?? "unknown";
+  const recommendation = status.jev?.response?.answers?.model?.choice ?? status.tier ?? "unknown";
+  const effortRecommendation = status.jev?.response?.answers?.effort?.choice ?? status.effort;
   return [
     `┌${"─".repeat(WIDTH)}┐`,
     row("Jev Router"),
@@ -45,8 +46,17 @@ export function formatExplanation(status) {
     row(),
     row(`Recommended tier: ${recommendation.toUpperCase()}`),
     row(`Selected model: ${(status.model ?? status.tier ?? "unknown").toUpperCase()}`),
+    ...(status.effort
+      ? [row(`Selected effort: ${status.effortMode === "auto" ? `AUTO → ${status.effort.toUpperCase()}` : status.effort.toUpperCase()}`)]
+      : []),
+    ...(effortRecommendation && effortRecommendation !== status.effort
+      ? [row(`Recommended effort: ${effortRecommendation.toUpperCase()}`)]
+      : []),
     row(),
     row(`Confidence: ${status.confidence == null ? "n/a" : `${Math.round(status.confidence * 100)}%`}`),
+    ...(status.effortConfidence == null
+      ? []
+      : [row(`Effort confidence: ${Math.round(status.effortConfidence * 100)}%`)]),
     row(`Decision: ${decision(status.reason)}`),
     `└${"─".repeat(WIDTH)}┘`,
   ].join("\n");

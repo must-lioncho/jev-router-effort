@@ -150,6 +150,24 @@ export const questionForModels = (models) =>
     ),
   );
 
+/** Build an effort choice from the levels the signed-in Codex account actually exposes. */
+export const questionForEfforts = (efforts) =>
+  choice(
+    [
+      "Pick the lowest reasoning effort that can fully complete this coding request in one pass.",
+      "Use higher effort only when the task's ambiguity, reasoning depth, or blast radius requires it.",
+    ],
+    Object.fromEntries(
+      efforts.map((effort, index) => [
+        effort,
+        {
+          effort,
+          guidance: `Reasoning level ${index + 1} of ${efforts.length}, ordered from least to most intensive by the Codex model catalog.`,
+        },
+      ]),
+    ),
+  );
+
 /** Whether policy accepted Jev's exact model, including a version change within one tier. */
 export const shouldUseExactModel = (reason, chosenTier, finalTier) =>
   (reason === "jev" || reason === "jev/no-change") && chosenTier === finalTier;

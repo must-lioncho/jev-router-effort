@@ -3,6 +3,7 @@ import {
   COMPLEXITY_MAX_SCORE,
   CONTEXT_WINDOW_TOKENS,
   QUESTIONS,
+  questionForEfforts,
   questionForModels,
   THRESHOLDS,
 } from "./config.mjs";
@@ -29,7 +30,7 @@ function getClient() {
  *
  * @returns {Promise<?{choice: string, confidence: number, probabilities: object, metrics: object, ms: number}>}
  */
-export async function askJev({ prompt, current, contextTokens, models }) {
+export async function askJev({ prompt, current, currentEffort, contextTokens, models, efforts = [] }) {
   if (!models?.length) return null;
   const started = Date.now();
   const abort = new AbortController();
@@ -37,16 +38,26 @@ export async function askJev({ prompt, current, contextTokens, models }) {
   const request = {
     state: {
       request: prompt,
-      session: { current_model: current, context_tokens: contextTokens },
-      environment: { available_models: models.map((model) => model.id) },
+      session: { current_model: current, current_effort: currentEffort, context_tokens: contextTokens },
+      environment: {
+        available_models: models.map((model) => model.id),
+        ...(efforts.length ? { available_reasoning_efforts: efforts } : {}),
+      },
     },
-    questions: { ...QUESTIONS, model: questionForModels(models) },
+    questions: {
+      ...QUESTIONS,
+      model: questionForModels(models),
+      ...(efforts.length ? { effort: questionForEfforts(efforts) } : {}),
+    },
   };
   try {
     const result = await getClient().systemOne(request, { signal: abort.signal });
-    const { model: answer, task_complexity, reasoning_required, tool_complexity } = result.answers;
+    const { model: answer, effort, task_complexity, reasoning_required, tool_complexity } = result.answers;
     return {
       ...answer,
+      effort: effort?.choice ?? null,
+      effortConfidence: effort?.confidence ?? null,
+      effortProbabilities: effort?.probabilities ?? null,
       request,
       response: result,
       metrics: {

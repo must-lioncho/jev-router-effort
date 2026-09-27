@@ -3,7 +3,7 @@ import { accessSync, constants, copyFileSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { CODEX_AUTO_MODEL, startCodexProxy } from "./codex-proxy.mjs";
+import { CODEX_AUTO_EFFORT, CODEX_AUTO_MODEL, startCodexProxy } from "./codex-proxy.mjs";
 
 const PROVIDER = "jev";
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -51,10 +51,17 @@ export function resolveCodex() {
   return null;
 }
 
-export const codexArgs = (baseURL, args) => [
-  ...(args.some((arg) => arg === "--model" || arg === "-m" || arg.startsWith("--model="))
-    ? []
-    : ["--model", CODEX_AUTO_MODEL]),
+export const codexArgs = (baseURL, args) => {
+  const modelIndex = args.findIndex((arg) => arg === "--model" || arg === "-m");
+  const inlineModel = args.find((arg) => arg.startsWith("--model=") || arg.startsWith("-m="));
+  const selectedModel = modelIndex >= 0
+    ? args[modelIndex + 1]
+    : inlineModel?.slice(inlineModel.indexOf("=") + 1);
+  return [
+  ...(selectedModel ? [] : ["--model", CODEX_AUTO_MODEL]),
+  ...(!selectedModel || selectedModel === CODEX_AUTO_MODEL
+    ? ["--config", `model_reasoning_effort="${CODEX_AUTO_EFFORT}"`]
+    : []),
   "--config",
   `model_provider="${PROVIDER}"`,
   "--config",
@@ -68,7 +75,8 @@ export const codexArgs = (baseURL, args) => [
   "--config",
   `model_providers.${PROVIDER}.supports_websockets=false`,
   ...args,
-];
+  ];
+};
 
 // Loads configuration, starts the optional routing proxy, and launches the Codex CLI.
 export async function runCodex() {
