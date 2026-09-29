@@ -3,3 +3,6 @@ node_modules/
 .env
 
 .zai/
+Analyzer/private/
+.jev-router/
+issue/**/private/
