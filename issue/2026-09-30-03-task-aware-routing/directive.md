@@ -1,0 +1,3 @@
+# Directive
+
+Implement `src/evidence-policy.mjs`, `src/task-runtime.mjs`, four proxy integrations, policy/explain compatibility and `bin/jev-maintain.mjs`. Store raw task context only in local private state. Validate rule counts, evidence IDs, age, exact model and effort. Preserve explicit choices and cold start. Never reinterpret a hold as a transient JEV failure. Verify concurrent task locks, continuation/restart, checkpoint failure, handoff duplication, rule conflicts and actual upstream request suppression in each adapter. Package public tooling without private data; activate locally only after tests. Record outcomes and limitations before the issue-scoped commit.

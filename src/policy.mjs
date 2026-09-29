@@ -46,6 +46,9 @@ export function decide({ prompt, jev, current, available, contextTokens = 0 }) {
 
   if (!jev || !TIER_NAMES.includes(jev.choice)) return settle(current, "jev-unavailable");
 
+  // The task runtime validates exact model/effort support and evidence before setting this.
+  if (jev.evidence?.enforced === true) return settle(jev.choice, "evidence");
+
   let target = jev.choice;
 
   if (jev.confidence < THRESHOLDS.minConfidence) {

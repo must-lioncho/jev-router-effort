@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { AGY_AUTO_MODEL, AGY_DEFAULT_UPSTREAM, startAgyProxy } from "./agy-proxy.mjs";
 import { loadEnv } from "./codex-cli.mjs";
+import { executionWorkspace } from './execution-workspace.mjs';
 
 // Subcommands manage AGY itself rather than running a conversation, so they need no proxy.
 const SUBCOMMANDS = new Set([
@@ -70,6 +71,7 @@ export async function runAnti(args = process.argv.slice(2)) {
   // AGY reads CLOUD_CODE_URL as its API server. A value the user already set becomes the
   // proxy's upstream, and the override is given to the child only.
   const proxy = await startAgyProxy({
+    ...executionWorkspace('antigravity', args),
     upstream: process.env.CLOUD_CODE_URL || AGY_DEFAULT_UPSTREAM,
     statusId: `agy-${process.pid}`,
   });

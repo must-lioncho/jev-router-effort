@@ -18,7 +18,8 @@
     "jev-claude": "bin/jev-claude.mjs",
     "jev-codex": "bin/jev-codex.mjs",
     "jev-glm": "bin/jev-glm.mjs",
-    "jev-explain": "bin/jev-explain.mjs"
+    "jev-explain": "bin/jev-explain.mjs",
+    "jev-maintain": "bin/jev-maintain.mjs"
   },
   "scripts": {
     "test": "node --test \"test/**/*.test.mjs\"",
@@ -29,6 +30,12 @@
     "bin",
     "skills",
     "src",
+    "Analyzer/cli.mjs",
+    "Analyzer/lib",
+    "Analyzer/README.md",
+    "docs/routing-policy.json",
+    "docs/improvement-harness.md",
+    "docs/execution-safeguards.md",
     "README.md"
   ],
   "keywords": [

@@ -15,6 +15,7 @@ import {
 } from "./config.mjs";
 import { askJev, warmJev } from "./router.mjs";
 import { decide } from "./policy.mjs";
+import { createTaskRuntime, sendRoutingHold } from "./task-runtime.mjs";
 import { log } from "./log.mjs";
 import { writeDecision, writeStatus } from "./status.mjs";
 import {
@@ -274,8 +275,12 @@ export async function startProxy({
   route = askJev,
   describe = describeClaudeImages,
   describeDeadlineMs = DESCRIBE_DEADLINE_MS,
+  runtimeConfig,
+  cwd = process.cwd(),
+  workspaceError,
 } = {}) {
   if (route === askJev) warmJev();
+  const tasks = createTaskRuntime({ cli: "claude", route, cwd, workspaceError, config: runtimeConfig ?? (route !== askJev ? { enabled: false } : undefined) });
   // Tier routed for each conversation's turn in flight, reused by its follow-up requests and
   // by the cache-rebuild guard, which needs to know what the prompt cache was built on.
   const convos = new Map();
@@ -308,6 +313,7 @@ export async function startProxy({
             writeFileSync(`${process.env.JEV_DUMP}.${Date.now()}.json`, JSON.stringify(body, null, 2));
           }
           body.tools?.forEach((t) => sanitizeSchema(t.input_schema));
+          if (Array.isArray(body.tools)) tasks.assertLocal(conversationKey(body));
 
           // Anything that is not the sentinel is a model the user chose, and an explicit
           // choice beats the router. That also covers Claude Code's own cheap Haiku calls
@@ -321,6 +327,7 @@ export async function startProxy({
             }
           } else {
             const key = conversationKey(body);
+            tasks.assertLocal(key);
             const state = stateFor(key);
             routingState = state;
             // What the prompt cache was built on, which is what a downgrade would discard.
@@ -342,7 +349,9 @@ export async function startProxy({
                     model: modelForTier(claudeModels([...catalog.values()]), "haiku"),
                   })
                 : null;
-              const jev = await route({
+              const jev = await tasks.route({
+                taskKey: key,
+                taskHistory: body.messages.filter(m => m.role === "user").map(m => newTurnPrompt({ ...body, messages: [m] })).filter(Boolean),
                 prompt: withImageDescriptions(prompt, images.length, descriptions), current: currentModel, currentEffort: state.effort ?? body.output_config?.effort,
                 contextTokens, models, efforts: CLAUDE_EFFORTS,
               });
@@ -373,10 +382,12 @@ export async function startProxy({
                 confidence: jev?.confidence ?? null,
                 metrics: jev?.metrics ?? null,
                 reason,
+                evidence: jev?.evidence ?? null,
+                checkpoint: jev?.checkpoint ?? null,
                 jev: jev ? { request: jev.request, response: jev.response } : null,
               };
               debug(
-                `${key} ${jev ? `${jev.ms}ms p=${jev.confidence.toFixed(2)}` : "no-jev"} ` +
+                `${key} ${jev ? `${jev.ms ?? "?"}ms p=${jev.confidence?.toFixed(2) ?? "unknown"}` : "no-jev"} ` +
                   `${current} -> ${tier} (${reason}) ctx~${contextTokens} | ${prompt.slice(0, 60)}`,
               );
             }
@@ -390,6 +401,7 @@ export async function startProxy({
               body.output_config ??= {};
               body.output_config.effort = state.effort;
             }
+            tasks.assertModel({ taskKey: key, model, effort: state.effort });
             if (fresh) state.notice = routingNotice({ model, effort: state.effort, confidence: fresh.confidence, reason: fresh.reason });
             notice = state.notice;
             // Publish what went out. Claude Code's UI shows the row you picked, not the tier
@@ -404,6 +416,7 @@ export async function startProxy({
           }
           out = Buffer.from(JSON.stringify(body));
         } catch (err) {
+          if (sendRoutingHold(res, err)) return;
           debug(`passthrough, could not process body: ${err.message}`);
         }
       }

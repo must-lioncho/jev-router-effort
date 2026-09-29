@@ -170,4 +170,4 @@ export const questionForEfforts = (efforts) =>
 
 /** Whether policy accepted Jev's exact model, including a version change within one tier. */
 export const shouldUseExactModel = (reason, chosenTier, finalTier) =>
-  (reason === "jev" || reason === "jev/no-change") && chosenTier === finalTier;
+  ["jev", "jev/no-change", "evidence", "evidence/no-change"].includes(reason) && chosenTier === finalTier;

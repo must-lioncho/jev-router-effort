@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CODEX_AUTO_EFFORT, CODEX_AUTO_MODEL, startCodexProxy } from "./codex-proxy.mjs";
+import { executionWorkspace } from './execution-workspace.mjs';
 
 const PROVIDER = "jev";
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -117,7 +118,7 @@ export async function runCodex() {
   const statusId = `codex-${process.pid}`;
   process.env.JEV_CODEX_STATUS_ID = statusId;
   if (process.env.JEV_API_KEY || process.env.TYPESAFE_API_KEY) {
-    const proxy = await startCodexProxy({ statusId });
+    const proxy = await startCodexProxy({ statusId, ...executionWorkspace('codex', args) });
     close = proxy.close;
     args = codexArgs(`http://127.0.0.1:${proxy.port}`, args);
   } else {

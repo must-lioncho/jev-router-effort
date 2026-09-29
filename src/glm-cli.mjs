@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { resolveAnti } from "./anti-cli.mjs";
 import { loadEnv } from "./codex-cli.mjs";
 import { GLM_DEFAULT_UPSTREAM, startGlmProxy } from "./glm-proxy.mjs";
+import { executionWorkspace } from './execution-workspace.mjs';
 
 /**
  * Prefers the `glm` launcher, which reads the z.ai key from the Keychain, over bare `zai`.
@@ -54,6 +55,7 @@ export async function runGlm(args = process.argv.slice(2)) {
   }
 
   const proxy = await startGlmProxy({
+    ...executionWorkspace('glm', args),
     upstream: process.env.ZAI_BASE_URL || GLM_DEFAULT_UPSTREAM,
     statusId: `glm-${process.pid}`,
     onDecision: (routing) => setTitle(glmTitle(routing)),

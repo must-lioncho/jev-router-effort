@@ -4,6 +4,7 @@ import https from "node:https";
 import { availableTiers, shouldUseExactModel } from "./config.mjs";
 import { log } from "./log.mjs";
 import { decide } from "./policy.mjs";
+import { createTaskRuntime, sendRoutingHold } from "./task-runtime.mjs";
 import { askJev, warmJev } from "./router.mjs";
 import { writeDecision } from "./status.mjs";
 
@@ -125,8 +126,12 @@ export async function startGlmProxy({
   route = askJev,
   statusId = "",
   onDecision = () => {},
+  runtimeConfig,
+  cwd = process.cwd(),
+  workspaceError,
 } = {}) {
   if (route === askJev) warmJev();
+  const tasks = createTaskRuntime({ cli: "glm", route, cwd, workspaceError, config: runtimeConfig ?? (route !== askJev ? { enabled: false } : undefined) });
   const states = new Map();
   const base = new URL(upstream);
   const basePath = base.pathname.replace(/\/$/, "");
@@ -138,7 +143,9 @@ export async function startGlmProxy({
     const currentModel = previous?.model ?? candidates.find((model) => model.tier === "opus")?.id ?? candidates[0].id;
     const current = glmTierOf(currentModel);
     const contextTokens = Math.round(JSON.stringify(body.messages ?? []).length / 4);
-    const jev = await route({
+    const jev = await tasks.route({
+      taskKey: key,
+      taskHistory: body.messages.filter(m => m.role === "user").map(m => typeof m.content === "string" ? m.content : "").filter(Boolean),
       prompt,
       current: currentModel,
       currentEffort: previous?.effort ?? null,
@@ -171,6 +178,8 @@ export async function startGlmProxy({
       effortConfidence: jev?.effortConfidence ?? null,
       metrics: jev?.metrics ?? null,
       reason: decision.reason,
+      evidence: jev?.evidence ?? null,
+      checkpoint: jev?.checkpoint ?? null,
       jev: jev ? { request: jev.request, response: jev.response } : null,
       at: Date.now(),
     };
@@ -191,12 +200,14 @@ export async function startGlmProxy({
           const replying = isNoteReply(raw);
           const body = stripGlmNotes(raw);
           const key = glmConversationKey(body);
+          tasks.assertLocal(key);
           const prompt = replying ? null : glmNewTurnPrompt(body);
           if (prompt) {
             let routing = null;
             try {
               routing = await choose(body, key, prompt);
             } catch (err) {
+              if (err.routingHold) throw err;
               log(`glm routing failed: ${err.message}`);
             }
             // Answer this request ourselves; the CLI comes back with the echo's result and
@@ -208,8 +219,10 @@ export async function startGlmProxy({
           const state = states.get(key);
           if (state?.model) body.model = state.model;
           if (state?.effort && body.thinking?.type !== "disabled") body.reasoning_effort = state.effort;
+          tasks.assertModel({ taskKey: key, model: body.model, effort: body.reasoning_effort });
           out = Buffer.from(JSON.stringify(body));
         } catch (err) {
+          if (sendRoutingHold(res, err)) return;
           debug(`glm request not rewritten: ${err.message}`);
         }
       }

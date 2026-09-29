@@ -7,6 +7,7 @@ import { availableTiers, shouldUseExactModel } from "./config.mjs";
 import { askJev, warmJev } from "./router.mjs";
 import { shouldDescribeImages } from "./image-describe.mjs";
 import { decide } from "./policy.mjs";
+import { createTaskRuntime, sendRoutingHold } from "./task-runtime.mjs";
 import { log } from "./log.mjs";
 import { writeDecision, writeStatus } from "./status.mjs";
 
@@ -396,8 +397,12 @@ export async function startAgyProxy({
   describe = describeAgyImages,
   describeDeadlineMs = 4000,
   imageBudgetBytes = AGY_IMAGE_CACHE_BUDGET_BYTES,
+  runtimeConfig,
+  cwd = process.cwd(),
+  workspaceError,
 } = {}) {
   if (route === askJev) warmJev();
+  const tasks = createTaskRuntime({ cli: "antigravity", route, cwd, workspaceError, config: runtimeConfig ?? (route !== askJev ? { enabled: false } : undefined) });
   const states = new Map();
   // Per conversation: path -> {mtimeMs, size, mimeType, data}, so every later request in it
   // re-attaches the same bytes without describing them again. Kept in least-recently-used
@@ -454,7 +459,8 @@ export async function startAgyProxy({
       imageMs = Date.now() - started;
       jevPrompt = agyPromptWithImages(prompt, images, descriptions);
     }
-    const jev = await route({ prompt: jevPrompt, current: currentModel, contextTokens, models: candidates });
+    const jev = await tasks.route({ prompt: jevPrompt, current: currentModel, contextTokens, models: candidates,
+      taskKey: key, taskHistory: (body.request?.contents ?? []).filter(c => c.role === "user").map(userRequestOf).filter(Boolean) });
     const chosen = candidates.find((model) => model.id === jev?.choice);
     const decision = decide({
       prompt,
@@ -476,6 +482,8 @@ export async function startAgyProxy({
       confidence: jev?.confidence ?? null,
       metrics: jev?.metrics ?? null,
       reason: decision.reason,
+      evidence: jev?.evidence ?? null,
+      checkpoint: jev?.checkpoint ?? null,
       images: images.length,
       imageMs,
       jev: jev ? { request: jev.request, response: jev.response } : null,
@@ -501,11 +509,13 @@ export async function startAgyProxy({
       if (req.method === "POST" && isGenerate(req.url)) {
         try {
           const body = stripAgyNotes(JSON.parse(out.toString()));
+          if (body.requestType !== "checkpoint") tasks.assertLocal(agyConversationKey(body));
           if (body.requestType === "checkpoint" && typeof body.model === "string") titleModel = body.model;
           const prompt = agyNewTurnPrompt(body);
           const images = prompt ? agyImagePaths(prompt) : [];
           if (body.model === AGY_AUTO_MODEL) {
             key = agyConversationKey(body);
+            tasks.assertLocal(key);
             let model;
             const state = states.get(key);
             try {
@@ -520,12 +530,14 @@ export async function startAgyProxy({
               timing.jev = Date.now() - t0;
               timing.imageMs = routing?.imageMs ?? null;
             } catch (err) {
+              if (err.routingHold) throw err;
               // Routing is fail-open: keep this conversation's model, or AGY's default.
               log(`agy routing failed: ${err.message}`);
               model = states.get(key)?.model ?? catalog?.defaultAgentModelId;
             }
             if (!model) throw new Error("AGY model catalog is not loaded yet; select a model with /model");
             applyAgyModel(body, model, catalog?.models?.[model]);
+            tasks.assertModel({ taskKey: key, model });
           } else if (prompt) {
             writeStatus(statusId, { manual: true, model: body.model, at: Date.now() });
           }
@@ -546,6 +558,7 @@ export async function startAgyProxy({
             writeFileSync(`${process.env.JEV_DUMP}.${Date.now()}.json`, dump);
           }
         } catch (err) {
+          if (sendRoutingHold(res, err)) return;
           res.writeHead(503, { "content-type": "application/json" });
           res.end(JSON.stringify({ error: { code: 503, message: `Jev routing failed: ${err.message}`, status: "UNAVAILABLE" } }));
           return;

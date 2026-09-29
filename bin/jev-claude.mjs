@@ -8,6 +8,7 @@ import { startProxy } from "../src/proxy.mjs";
 import { AUTO_MODEL } from "../src/config.mjs";
 import { readSavedModel, restoreSavedModel } from "../src/settings.mjs";
 import { LOG_FILE } from "../src/log.mjs";
+import { executionWorkspace } from '../src/execution-workspace.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = dirname(HERE);
@@ -109,6 +110,7 @@ function resolveClaude() {
 }
 
 const args = process.argv.slice(2);
+const workspace = executionWorkspace('claude', args);
 args.push("--add-dir", ROOT);
 const env = { ...process.env };
 
@@ -123,7 +125,7 @@ if (!claude) {
 }
 
 if (process.env.JEV_API_KEY || process.env.TYPESAFE_API_KEY) {
-  const { port, close } = await startProxy();
+  const { port, close } = await startProxy(workspace);
   env.ANTHROPIC_BASE_URL = `http://127.0.0.1:${port}`;
   env.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY = "1";
   Object.assign(env, autoModelEnv());

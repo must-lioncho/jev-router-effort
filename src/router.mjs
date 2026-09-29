@@ -41,7 +41,17 @@ export function warmJev() {
  *
  * @returns {Promise<?{choice: string, confidence: number, probabilities: object, metrics: object, ms: number}>}
  */
-export async function askJev({ prompt, current, currentEffort, contextTokens, models, efforts = [] }) {
+export function routingContext(context) {
+  if (!context) return undefined;
+  return {
+    taskType: context.taskType, complex: context.complex, mutating: context.mutating, signals: context.signals,
+    objective: String(context.objective ?? '').slice(0, 3000),
+    recentRequests: (context.recentRequests ?? []).slice(-2).map(value => String(value).slice(0, 1000)),
+    failures: (context.failures ?? []).slice(-2).map(f => ({ text: String(f.text ?? '').slice(0, 500), source: f.source })),
+  };
+}
+
+export async function askJev({ prompt, current, currentEffort, contextTokens, models, efforts = [], taskContext }) {
   if (!models?.length) return null;
   const started = Date.now();
   const abort = new AbortController();
@@ -49,6 +59,7 @@ export async function askJev({ prompt, current, currentEffort, contextTokens, mo
   const request = {
     state: {
       request: prompt,
+      ...(taskContext ? { task_context: routingContext(taskContext) } : {}),
       session: { current_model: current, current_effort: currentEffort, context_tokens: contextTokens },
       environment: {
         available_models: models.map((model) => model.id),

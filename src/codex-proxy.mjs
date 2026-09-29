@@ -5,6 +5,7 @@ import { writeFileSync } from "node:fs";
 import { availableTiers, shouldUseExactModel } from "./config.mjs";
 import { askJev, warmJev } from "./router.mjs";
 import { decide } from "./policy.mjs";
+import { createTaskRuntime, sendRoutingHold } from "./task-runtime.mjs";
 import { log } from "./log.mjs";
 import { writeDecision, writeStatus } from "./status.mjs";
 import {
@@ -270,8 +271,12 @@ export async function startCodexProxy({
   describe = describeCodexImages,
   describeDeadlineMs = DESCRIBE_DEADLINE_MS,
   statusId = "",
+  runtimeConfig,
+  cwd = process.cwd(),
+  workspaceError,
 } = {}) {
   if (route === askJev) warmJev();
+  const tasks = createTaskRuntime({ cli: "codex", route, cwd, workspaceError, config: runtimeConfig ?? (route !== askJev ? { enabled: false } : undefined) });
   const states = new Map();
   const models = new Map();
 
@@ -284,6 +289,7 @@ export async function startCodexProxy({
       if (req.method === "POST" && /\/responses(?:\?|$)/.test(req.url ?? "")) {
         try {
           const body = JSON.parse(out.toString());
+          tasks.assertLocal(codexConversationKey(body));
           if (process.env.JEV_DUMP) {
             writeFileSync(`${process.env.JEV_DUMP}.${Date.now()}.json`, JSON.stringify(body, null, 2));
           }
@@ -303,6 +309,7 @@ export async function startCodexProxy({
               for (const info of catalog.models) models.set(info.slug, info);
             }
             const key = codexConversationKey(body);
+            tasks.assertLocal(key);
             const candidates = codexModels(models).filter((model) =>
               availableTiers().includes(model.tier) &&
               // Keep the CLI's wire format: Lite bodies cannot safely be sent
@@ -334,7 +341,10 @@ export async function startCodexProxy({
                     model: candidates.find((candidate) => candidate.tier === "haiku") ?? candidates[0],
                   })
                 : null;
-              const jev = await route({
+              const jev = await tasks.route({
+                taskKey: key,
+                taskHistory: body.input.filter(i => i.role === "user").map(i => cleanPrompt(textOf(i.content))).filter(p => p && !isCodexAuxiliaryPrompt(p)),
+                manualEffort: effortMode === "manual" ? requestedEffort : null,
                 prompt: withImageDescriptions(prompt, images.length, descriptions),
                 current: currentModel,
                 currentEffort: effort,
@@ -374,6 +384,8 @@ export async function startCodexProxy({
                 effortConfidence: effortMode === CODEX_AUTO_EFFORT ? jev?.effortConfidence ?? null : null,
                 metrics: jev?.metrics ?? null,
                 reason: decision.reason,
+                evidence: jev?.evidence ?? null,
+                checkpoint: jev?.checkpoint ?? null,
                 jev: jev ? { request: jev.request, response: jev.response } : null,
                 at: Date.now(),
               };
@@ -385,6 +397,7 @@ export async function startCodexProxy({
               body.reasoning.effort = effort;
             }
             applyCodexTier(body, tier, models, model);
+            tasks.assertModel({ taskKey: key, model, effort });
           } else {
             const prompt = codexNewTurnPrompt(body);
             const explaining = prompt?.includes("<jev-explain>") || /^\$jev-explain\b/i.test(prompt ?? "");
@@ -392,6 +405,7 @@ export async function startCodexProxy({
           }
           out = Buffer.from(JSON.stringify(body));
         } catch (err) {
+          if (sendRoutingHold(res, err)) return;
           res.writeHead(503, { "content-type": "application/json" });
           res.end(JSON.stringify({ error: { message: `Jev routing failed: ${err.message}`, type: "routing_error" } }));
           return;

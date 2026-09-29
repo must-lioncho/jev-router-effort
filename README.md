@@ -33,6 +33,16 @@ Each CLI retains its native interface, tools, sessions, permissions, and authent
 All commands launch the real upstream CLI. Jev chooses a model at the start of each user
 turn.
 
+## Evidence-driven improvement (opt-in)
+
+`jev-maintain` collects recent local session evidence and supports a reviewed feedback →
+issue → tests → commit loop. The optional runtime preserves the task objective and
+failure reports, checkpoints complex changes before execution, and can hand off through
+Orca to an evidence-supported exact model in another CLI. Empty evidence keeps ordinary
+routing. Checkpoints are recovery material, not a shell sandbox. See the
+[improvement harness](docs/improvement-harness.md), [measured evidence](docs/routing-evidence.md)
+and [execution safeguards](docs/execution-safeguards.md).
+
 ## Quick start
 
 Requires Node.js 20.12+ and at least one supported CLI:
