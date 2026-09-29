@@ -1,41 +1,19 @@
-# Directive: native per-turn routing for `jev-agy`
+# Implementation directive
 
-Source of intent: [Intend.md](Intend.md).
+Read `Intend.md`. Work in this checkout; preserve unrelated files and other sessions' edits. The initial workspace was checkpointed at `refs/jev/checkpoints/20260930-bootstrap` (`6b932c984a7498275fe0f0a0585af940a4a42429`) without changing HEAD, staging or working files.
 
-1. **Proxy** — add `src/agy-proxy.mjs` with `startAgyProxy({ upstream, route, statusId })`, a
-   loopback reverse proxy in the style of `src/codex-proxy.mjs`.
-   - `POST …:fetchAvailableModels`: record the catalog; add a `jev-router` entry cloned from
-     `defaultAgentModelId` (display name "Jev Router (auto)") and put it first in every
-     `agentModelSorts` group.
-   - `POST …:streamGenerateContent` / `…:generateContent` with `model === "jev-router"`:
-     - New turn = last `contents` entry is a user message containing `<USER_REQUEST>`; take the
-       prompt from inside that tag. Ask Jev with the exact picker models (deprecated IDs
-       excluded), apply `decide`, remember the result per `labels.trajectory_id`.
-     - Continuation = anything else; reuse the remembered model (fallback: catalog default).
-     - Apply the chosen catalog entry: `model`, `labels.model_enum`, `labels.used_claude*`,
-       `labels.used_non_gemini_model`, `generationConfig.maxOutputTokens`,
-       `generationConfig.thinkingConfig.thinkingBudget`.
-     - On a routed new turn with a 2xx SSE reply, emit one text part
-       `[Jev] routed this turn to <id> (<reason>, confidence p).` before the first event,
-       using the upstream event delimiter.
-   - Every generate request: drop model parts whose text starts with `[Jev] ` from history.
-   - Other models on a new turn: write a `manual` status. Failures fall back to the remembered
-     or default model; the proxy never blocks a turn because Jev failed.
-2. **Launcher** — rewrite `runAnti` in `src/anti-cli.mjs`:
-   - Resolve `agy`, then `antigravity`. Subcommands (`models`, `plugin`, `mcp`, `update`, …)
-     pass straight through.
-   - With a Jev key: start the proxy (upstream = existing `CLOUD_CODE_URL` or the default), set
-     `CLOUD_CODE_URL` for the child only, and prepend `--model jev-router` unless the user gave
-     `--model`. Both the native TUI and `-p` go through the proxy.
-   - Without a key: launch AGY unchanged and print how to enable routing.
-   - Keep `stdio: "inherit"`, propagate exit codes, close the proxy on exit.
-   - Remove the old print-only `agy models` + restart path; the proxy replaces it.
-3. **Tests** — update `test/anti.test.mjs`; add `test/agy-proxy.test.mjs` against a fake
-   upstream: catalog injection, new-turn routing, continuation pinning, manual pass-through,
-   history stripping, decision injection, fail-open.
-4. **Docs** — README.md and README.kr.md: AGY row becomes per-turn routing via the native
-   picker; explain `CLOUD_CODE_URL`. Replace `DROP_REPORT.md` with the resolution.
-5. **Verify** — `npm test`; real `jev-agy -p`; real TUI in a pseudo-terminal with two turns
-   (one trivial, one hard) and `JEV_DEBUG=1`, reading `~/.jev-claude.log` for both decisions.
+## Work and ownership
 
-Do not touch the unrelated pending edits in `src/codex-cli.mjs`. Do not commit.
+1. **Harness and agents:** maintain the improvement process here; scaffold global `jev-router-improver`, `jev-claude-executor`, `jev-codex-executor` in the configured AIOS development repository. Definitions and descriptions obey the compact build contract, reference maintained procedures, undergo independent hash-bound review, and deploy only these scoped additions. The agent definition worker owns these files and the agent issue report. No unrelated AIOS release.
+2. **Analyzer:** implement collection, deterministic stratified sampling and review packets for 24/48h, plus feedback intake and policy compilation. Review at least 20% of eligible sessions, separate routed from unrouted, and successes/failures/unknown. Use explicit source evidence; generic text matching generates candidates, never verified quality labels. Keep transcripts/private extracts out of commits. The analysis worker owns `Analyzer/`, `test/analyzer.test.mjs`, and `docs/routing-evidence.md`.
+3. **Execution:** implement a preflight checkpoint API and Orca handoff API with injection-friendly dependencies and meaningful failure tests. Use real durable Git commits and refs, preserve the user's index/HEAD, explicitly report excluded/ignored files and refuse hazardous partial checkpoints. No automatic worktrees or rollback. The execution worker owns `src/checkpoint.mjs`, `src/handoff.mjs`, their tests and execution contract documentation.
+4. **Runtime integration:** coordinator owns task state, evidence policy, CLI adapters, feedback integration, launch configuration, root contracts, policy schema, packaging and overall verification. Model compatibility and manual choices remain respected. Persist compact task state and bounded local decision evidence. A pending external handoff suppresses local execution and retry duplicates; inadequate external evidence retains cold-start routing.
+5. **Validation and release:** offline tests for cold start, unknown evidence, task continuation, feedback, exact-model/effort eligibility, local compatibility, checkpoint failure and duplicate handoffs. Run repository tests, scoped agent review and a harmless Orca delivery smoke test; no destructive incident replay. Record limitations rather than claim comparative model improvement without enough outcomes. Coordinator commits each completed issue's owned paths; workers in this checkout do not commit.
+
+## Policy contract (v1)
+
+`docs/routing-policy.json` has `schemaVersion: 1`, `version`, `generatedAt`, `rules: []`. Each rule has `id`, `taskType`, `cli` (`claude|codex|antigravity|glm`), exact `model`, `effort` (string or null), `outcome` (`prefer|avoid`), `sampleSize`, `successes`, `failures`, `unknown`, `evidenceIds`, `status` (`candidate|validated`), and optional `reason`. No rule is validated solely because the assistant said complete; verified labels require cited user/QA or executable evidence. Minimum-support eligibility and expiry are implemented explicitly. Personal data is not bundled into the distributable default policy.
+
+## Agent execution contract
+
+The improvement owner accepts a failure report/session reference and owns evidence → dated issue → reviewed change → tests → commit → result. The Claude/Codex executor accepts one bounded handoff packet and selects only catalog-supported model/effort; it reports artifacts, checks and unresolved work. Cross-CLI handoff uses the same workspace with single-writer authority and the preflight checkpoint receipt. User/QA reports can be submitted through the local feedback CLI; unattended external messaging and a new cron are out of scope.
