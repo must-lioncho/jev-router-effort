@@ -7,6 +7,15 @@ import { askJev, warmJev } from "./router.mjs";
 import { decide } from "./policy.mjs";
 import { log } from "./log.mjs";
 import { writeDecision, writeStatus } from "./status.mjs";
+import {
+  DESCRIBE_DEADLINE_MS,
+  DESCRIBE_MAX_IMAGES,
+  describeHeaders,
+  describeInstruction,
+  parseDescriptions,
+  shouldDescribeImages,
+  withImageDescriptions,
+} from "./image-describe.mjs";
 
 const CHATGPT_BASE_URL = "https://chatgpt.com/backend-api/codex";
 const API_BASE_URL = "https://api.openai.com/v1";
@@ -98,6 +107,56 @@ export function codexNewTurnPrompt(body) {
     if (prompt && !isCodexAuxiliaryPrompt(prompt)) return prompt;
   }
   return null;
+}
+
+/** Images the user attached to the newest user message, capped so a description stays fast. */
+export function codexTurnImages(body) {
+  const last = [...(body?.input ?? [])].reverse().find((item) => item?.role === "user");
+  if (!Array.isArray(last?.content)) return [];
+  return last.content.filter((item) => item?.type === "input_image" && item.image_url).slice(0, DESCRIBE_MAX_IMAGES);
+}
+
+/**
+ * Asks the account's fastest model, at its lowest effort, for one short description per
+ * image, as routing input for Jev. Uses the turn's own credentials (forwarded, never read).
+ * The ChatGPT backend only streams, so the reply is read from SSE text deltas. Returns one
+ * string (or null) per image, or null on any failure or when `deadlineMs` passes. Never throws.
+ */
+export async function describeCodexImages({ images, headers, baseURL, model, deadlineMs = DESCRIBE_DEADLINE_MS }) {
+  try {
+    if (!images?.length || !model?.id) return null;
+    const forwarded = describeHeaders(headers);
+    delete forwarded["x-openai-internal-codex-responses-lite"];
+    const effort = ["none", "minimal", "low"].find((level) => model.efforts?.includes(level));
+    const response = await fetch(`${baseURL.replace(/\/$/, "")}/responses`, {
+      method: "POST",
+      headers: { ...forwarded, "content-type": "application/json", accept: "text/event-stream" },
+      body: JSON.stringify({
+        model: model.id,
+        instructions: "You describe images for a task router. Be brief and factual.",
+        input: [{ type: "message", role: "user", content: [...images, { type: "input_text", text: describeInstruction(images.length) }] }],
+        ...(effort ? { reasoning: { effort } } : {}),
+        stream: true,
+        store: false,
+      }),
+      signal: AbortSignal.timeout(deadlineMs),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    let text = "";
+    for (const line of (await response.text()).split(/\r?\n/)) {
+      if (!line.startsWith("data:")) continue;
+      try {
+        const event = JSON.parse(line.slice(5));
+        if (event.type === "response.output_text.delta") text += event.delta ?? "";
+      } catch { /* [DONE] and keep-alives */ }
+    }
+    const found = parseDescriptions(text, images.length);
+    debug(found ? `described ${found.filter(Boolean).length} image(s) with ${model.id}` : "image description empty");
+    return found;
+  } catch (err) {
+    debug(`image description failed: ${err.name === "TimeoutError" ? "timeout" : err.message}`);
+    return null;
+  }
 }
 
 export function codexConversationKey(body) {
@@ -208,6 +267,8 @@ export async function startCodexProxy({
   chatgptBaseURL = CHATGPT_BASE_URL,
   apiBaseURL = API_BASE_URL,
   route = askJev,
+  describe = describeCodexImages,
+  describeDeadlineMs = DESCRIBE_DEADLINE_MS,
   statusId = "",
 } = {}) {
   if (route === askJev) warmJev();
@@ -265,8 +326,16 @@ export async function startCodexProxy({
             if (prompt && !explaining) {
               const contextTokens = Math.round(JSON.stringify(body.input).length / 4);
               const efforts = [...new Set(candidates.flatMap((candidate) => candidate.efforts))];
+              const images = codexTurnImages(body);
+              const descriptions = images.length && shouldDescribeImages(prompt)
+                ? await describe({
+                    images, headers: req.headers, deadlineMs: describeDeadlineMs,
+                    baseURL: upstreamFor(req.headers, req.url, chatgptBaseURL, apiBaseURL),
+                    model: candidates.find((candidate) => candidate.tier === "haiku") ?? candidates[0],
+                  })
+                : null;
               const jev = await route({
-                prompt,
+                prompt: withImageDescriptions(prompt, images.length, descriptions),
                 current: currentModel,
                 currentEffort: effort,
                 contextTokens,

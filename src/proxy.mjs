@@ -17,6 +17,15 @@ import { askJev, warmJev } from "./router.mjs";
 import { decide } from "./policy.mjs";
 import { log } from "./log.mjs";
 import { writeDecision, writeStatus } from "./status.mjs";
+import {
+  DESCRIBE_DEADLINE_MS,
+  DESCRIBE_MAX_IMAGES,
+  describeHeaders,
+  describeInstruction,
+  parseDescriptions,
+  shouldDescribeImages,
+  withImageDescriptions,
+} from "./image-describe.mjs";
 
 const ANTHROPIC_BASE_URL = "https://api.anthropic.com";
 const CLAUDE_EFFORTS = ["low", "medium", "high"];
@@ -127,6 +136,43 @@ export function newTurnPrompt(body) {
   return text.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "").trim() || null;
 }
 
+/** Image blocks the user attached to a new turn, capped so a description stays fast. */
+export function turnImages(body) {
+  const last = body?.messages?.findLast((message) => message?.role !== "system");
+  if (last?.role !== "user" || !Array.isArray(last.content)) return [];
+  return last.content.filter((b) => b?.type === "image" && b.source).slice(0, DESCRIBE_MAX_IMAGES);
+}
+
+/**
+ * Asks a fast Claude model for one short description per image, as routing input for Jev.
+ * Uses the turn's own credentials (forwarded, never read). Returns one string (or null) per
+ * image, or null on any failure or when `deadlineMs` passes. Never throws.
+ */
+export async function describeClaudeImages({ images, headers, upstreamURL, model, deadlineMs = DESCRIBE_DEADLINE_MS }) {
+  try {
+    if (!images?.length || !model) return null;
+    const response = await fetch(`${upstreamURL.replace(/\/$/, "")}/v1/messages`, {
+      method: "POST",
+      headers: { ...describeHeaders(headers), "content-type": "application/json" },
+      body: JSON.stringify({
+        model,
+        max_tokens: 400,
+        messages: [{ role: "user", content: [...images, { type: "text", text: describeInstruction(images.length) }] }],
+      }),
+      signal: AbortSignal.timeout(deadlineMs),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    const text = (data.content ?? []).filter((b) => b.type === "text").map((b) => b.text).join("");
+    const found = parseDescriptions(text, images.length);
+    debug(found ? `described ${found.filter(Boolean).length} image(s) with ${model}` : "image description empty");
+    return found;
+  } catch (err) {
+    debug(`image description failed: ${err.name === "TimeoutError" ? "timeout" : err.message}`);
+    return null;
+  }
+}
+
 /**
  * Points a request at a tier, removing request fields that tier cannot accept. Claude Code
  * composes the body for whatever model it thinks it is talking to, so downgrading to Haiku
@@ -223,7 +269,12 @@ export function observeModel(state, current) {
 }
 
 
-export async function startProxy({ upstreamURL = ANTHROPIC_BASE_URL, route = askJev } = {}) {
+export async function startProxy({
+  upstreamURL = ANTHROPIC_BASE_URL,
+  route = askJev,
+  describe = describeClaudeImages,
+  describeDeadlineMs = DESCRIBE_DEADLINE_MS,
+} = {}) {
   if (route === askJev) warmJev();
   // Tier routed for each conversation's turn in flight, reused by its follow-up requests and
   // by the cache-rebuild guard, which needs to know what the prompt cache was built on.
@@ -284,8 +335,15 @@ export async function startProxy({ upstreamURL = ANTHROPIC_BASE_URL, route = ask
               const available = [...new Set(models.map((model) => model.tier))];
               const currentModel = state.model ?? modelForTier(models, current);
               const contextTokens = Math.round(JSON.stringify(body.messages).length / 4);
+              const images = turnImages(body);
+              const descriptions = images.length && shouldDescribeImages(prompt)
+                ? await describe({
+                    images, headers: req.headers, upstreamURL, deadlineMs: describeDeadlineMs,
+                    model: modelForTier(claudeModels([...catalog.values()]), "haiku"),
+                  })
+                : null;
               const jev = await route({
-                prompt, current: currentModel, currentEffort: state.effort ?? body.output_config?.effort,
+                prompt: withImageDescriptions(prompt, images.length, descriptions), current: currentModel, currentEffort: state.effort ?? body.output_config?.effort,
                 contextTokens, models, efforts: CLAUDE_EFFORTS,
               });
               const chosen = models.find((model) => model.id === jev?.choice);

@@ -101,11 +101,34 @@ Each fresh decision is the first line of the answer. It appears as soon as Jev d
 [Jev] routed this turn to gemini-3.1-pro-low (jev, confidence 0.32).
 ```
 
-Jev chooses among the exact IDs in the signed-in account's agent picker, such as
-`gemini-3.8-flash-low`, `gemini-3.1-pro-low`, `claude-sonnet-4-6`, or `gpt-oss-120b-medium`.
+Jev chooses among the exact Gemini IDs in the signed-in account's agent picker, such as
+`gemini-3.8-flash-low`, `gemini-3.1-pro-low`, or `gemini-pro-agent`. AGY routing currently
+covers Gemini models only: Claude is excluded because Claude through AGY rejects replayed
+thinking parts that lack signatures.
 AGY encodes the thinking level in the ID (`-low`, `-medium`, `-high`), so the chosen ID also
 sets the effort. Tool continuations keep the turn's model. Jev's notes are removed from the
 conversation history before each request, so the model never reads them.
+
+Screenshots pasted as local paths (for example Orca's `/var/folders/…/orca-paste-….png`)
+are handled on new turns. Each absolute `png`, `jpg`, `jpeg`, `gif`, or `webp` path in the
+prompt that exists and is at most 7 MB is attached to the forwarded message as image data,
+so the model sees the pixels without a tool call. Jev reads only text, so before asking it
+the proxy has a fast image-capable Gemini model from the signed-in catalog (the one AGY uses
+for titles, `gemini-3.5-flash-lite` at the time of writing) describe each image, and Jev gets
+the prompt with the path replaced by `[image: <description>]`. The description is routing
+input only; the model gets the real image. It uses the same upstream and forwarded headers
+as the turn. Measured cost: 1.7–2.9 s per image turn (median about 2.2 s, six real runs)
+before the decision line appears. The step has a 4 s limit; on timeout or error Jev gets
+`[image attached: <file name>, not described]` and the turn is routed anyway. Text-only
+turns make no extra calls. AGY's history does not keep the attached image, so tool
+continuations and later turns in the same conversation re-attach the same bytes from a
+per-conversation cache (re-read if the file changed, dropped if it is gone) and never
+describe them again. Files are checked by their magic bytes, and one request carries at most
+about 14 MB of images, newest turn first; the proxy keeps at most about 64 MB of cached
+images and drops the least recently used conversation beyond that. If the upstream refuses a
+request carrying attached images with 400, 413 or 422, the proxy resends it with the newest
+turn's images only (413, or 400 when several turns had images), then with none. Other errors,
+including 429 and 5xx, keep the images and follow the normal retry.
 
 AGY reads its API server from `CLOUD_CODE_URL`. `jev-agy` sets it for the child process only;
 a value you already exported becomes the proxy's upstream. AGY subcommands such as
