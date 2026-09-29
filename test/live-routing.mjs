@@ -1,8 +1,5 @@
-try {
-  process.loadEnvFile();
-} catch {
-  // No .env; the key may still come from the real environment.
-}
+import { loadEnv } from "../src/codex-cli.mjs";
+loadEnv();
 const { askJev } = await import("../src/router.mjs");
 const models = ["haiku", "sonnet", "opus", "fable"].map((tier) => ({ id: tier, tier }));
 const prompts = [

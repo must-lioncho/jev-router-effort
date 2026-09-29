@@ -20,23 +20,23 @@ advertised by the signed-in model catalog. It also fixes Codex model-selection e
 fetching the account catalog on cold start, filtering incompatible request formats, and
 keeping the chosen model and effort for tool continuations.
 
-Automatic per-turn model routing for Claude Code and OpenAI Codex. Jev sends simple work to
-the fast tier and difficult work to the strong tier, while preserving each CLI's native
-interface, tools, sessions, permissions, and authentication.
+Automatic per-turn model routing for Claude Code, OpenAI Codex, and AGY (Antigravity CLI).
+Each CLI retains its native interface, tools, sessions, permissions, and authentication.
 
 | Command | Interface | Authentication | Routing decision |
 | --- | --- | --- | --- |
 | `jev-claude` | Claude Code | Existing `claude login` | Status line |
 | `jev-codex` | OpenAI Codex | Existing `codex login` | Commentary line |
+| `jev-agy` / `jev -A` / `jev-a` / `jev-anti` / `jev-antigravity` | AGY (Antigravity CLI) | Existing AGY login | First streamed line |
 
-Both commands launch the real upstream CLI. Jev chooses a model and reasoning effort at the
-start of each user turn.
+All commands launch the real upstream CLI. Jev chooses a model at the start of each user
+turn.
 
 ## Quick start
 
 Requires Node.js 20.12+ and at least one supported CLI:
-[Claude Code](https://code.claude.com/docs/en/setup) or
-[OpenAI Codex](https://developers.openai.com/codex/cli).
+[Claude Code](https://code.claude.com/docs/en/setup),
+[OpenAI Codex](https://developers.openai.com/codex/cli), or Antigravity CLI.
 
 ### 1. Upstream npm package
 
@@ -70,6 +70,7 @@ repository:
 ```bash
 jev-claude
 jev-codex
+jev-agy
 ```
 
 No Anthropic or OpenAI API key is required when the corresponding CLI is already logged in
@@ -82,8 +83,33 @@ jev-codex resume --last
 jev-codex exec "fix the failing test"
 ```
 
-For a local checkout, `npm link` installs both commands. Without it, run
+For a local checkout, `npm link` installs the commands. Without it, run
 `node bin/jev-claude.mjs` or `node bin/jev-codex.mjs`.
+
+## Antigravity (`jev-agy`)
+
+`jev-agy` opens AGY's native terminal UI with **Jev Router (auto)** selected in `/model`.
+`jev -A`, `jev-a`, `jev-anti`, and `jev-antigravity` are aliases. Selecting another model in
+the picker pauses routing; selecting **Jev Router (auto)** resumes it. `-p`/`--print` prompts
+are routed the same way.
+
+Each fresh decision is the first line of the answer. It appears as soon as Jev decides
+(about 0.5 s), before the model's first token, which can take much longer:
+
+```text
+[Jev] routed this turn to gemini-3.1-pro-low (jev, confidence 0.32).
+```
+
+Jev chooses among the exact IDs in the signed-in account's agent picker, such as
+`gemini-3.8-flash-low`, `gemini-3.1-pro-low`, `claude-sonnet-4-6`, or `gpt-oss-120b-medium`.
+AGY encodes the thinking level in the ID (`-low`, `-medium`, `-high`), so the chosen ID also
+sets the effort. Tool continuations keep the turn's model. Jev's notes are removed from the
+conversation history before each request, so the model never reads them.
+
+AGY reads its API server from `CLOUD_CODE_URL`. `jev-agy` sets it for the child process only;
+a value you already exported becomes the proxy's upstream. AGY subcommands such as
+`jev-agy models` run without the proxy. Nothing in AGY's installation, `settings.json`, or
+`config.json` is changed.
 
 ## Claude Code interface
 
@@ -216,11 +242,16 @@ you -> Claude Code -> jev-claude proxy -> Anthropic
 you -> OpenAI Codex -> jev-codex proxy -> OpenAI
                          |
                          +-> Jev: choose a tier
+
+you -> AGY -> jev-agy proxy -> Google Cloud Code
+                 |
+                 +-> Jev: choose an exact model
 ```
 
 Claude Code uses `ANTHROPIC_BASE_URL`; Codex uses a temporary custom provider with
-`requires_openai_auth=true`. Claude and Codex both use `jev-router` as the
-routing sentinel.
+`requires_openai_auth=true`; AGY uses `CLOUD_CODE_URL`, and the proxy adds `jev-router` to
+AGY's `fetchAvailableModels` reply so the native picker shows it. All three use `jev-router`
+as the routing sentinel.
 Any concrete model selected by the user passes through unchanged.
 
 ## Routing policy
@@ -250,10 +281,10 @@ sub-agents are pinned separately. Routing is fail-open: Jev failure never blocks
 
 | Variable | Interface | Effect |
 | --- | --- | --- |
-| `JEV_API_KEY` | Both | Enables routing. `TYPESAFE_API_KEY` also works. |
-| `JEV_ALLOW_FABLE` | Both | Enables the opt-in long tier. |
-| `JEV_DEBUG` | Both | Logs decisions and rewrites to `~/.jev-claude.log` in interactive sessions. |
-| `JEV_DUMP` | Both | Dumps request bodies for debugging wire-format changes. |
+| `JEV_API_KEY` | All | Enables routing. `TYPESAFE_API_KEY` also works. |
+| `JEV_ALLOW_FABLE` | All | Enables the opt-in long tier. |
+| `JEV_DEBUG` | All | Logs decisions and rewrites to `~/.jev-claude.log` in interactive sessions. |
+| `JEV_DUMP` | All | Dumps request bodies for debugging wire-format changes. |
 | `JEV_NO_STATUSLINE` | Claude | Disables the injected Claude status line. |
 | `JEV_CODEX_FAST_MODEL` | Codex | Fast model; defaults to `gpt-5.6-luna`. |
 | `JEV_CODEX_BALANCED_MODEL` | Codex | Balanced model; defaults to `gpt-5.6-terra`. |

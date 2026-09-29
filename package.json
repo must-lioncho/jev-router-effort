@@ -10,6 +10,11 @@
   "homepage": "https://github.com/must-lioncho/jev-router-effort#readme",
   "bugs": "https://github.com/must-lioncho/jev-router-effort/issues",
   "bin": {
+    "jev": "bin/jev.mjs",
+    "jev-a": "bin/jev-anti.mjs",
+    "jev-agy": "bin/jev-anti.mjs",
+    "jev-anti": "bin/jev-anti.mjs",
+    "jev-antigravity": "bin/jev-anti.mjs",
     "jev-claude": "bin/jev-claude.mjs",
     "jev-codex": "bin/jev-codex.mjs",
     "jev-explain": "bin/jev-explain.mjs"

@@ -22,8 +22,8 @@
 
 ## 설치
 
-Node.js 20.12 이상과 [Claude Code](https://code.claude.com/docs/en/setup) 또는
-[OpenAI Codex](https://developers.openai.com/codex/cli)가 필요합니다.
+Node.js 20.12 이상과 [Claude Code](https://code.claude.com/docs/en/setup),
+[OpenAI Codex](https://developers.openai.com/codex/cli), AGY(Antigravity CLI) 중 하나가 필요합니다.
 
 ```bash
 git clone https://github.com/must-lioncho/jev-router-effort.git
@@ -33,12 +33,37 @@ npm link
 echo "JEV_API_KEY=..." > ~/.jev-router.env
 jev-claude
 # 또는 jev-codex
+# AGY: jev-agy
 ```
 
 [TypeSafe](https://docs.typesafe.ai)에서 Jev API 키를 받을 수 있습니다. `jev-claude`와
 `jev-codex`는 각각 기존 CLI의 로그인과 도구를 사용합니다. `JEV_API_KEY`가 없으면
 라우팅 없이 해당 CLI를 실행합니다. `npm install -g jev-router`는 이 버전이 아닌
 원작자의 npm 패키지를 설치합니다.
+
+## Antigravity: `jev-agy`
+
+공식 CLI 이름인 `agy`에 맞춘 `jev-agy`로 원래 터미널 화면을 엽니다.
+`jev -A`, `jev-a`, `jev-anti`, `jev-antigravity`도 같은 실행기입니다.
+
+```bash
+jev-agy
+jev -A
+jev-agy -p "코드에서 경쟁 상태를 찾아줘"
+jev-antigravity --model claude-sonnet-4-6 -p "이 파일을 요약해줘"
+```
+
+`jev-agy`는 `/model`에 **Jev Router (auto)**를 추가하고 그 항목으로 시작합니다. 대화 중
+사용자가 보내는 매 턴마다 Jev가 계정의 실제 모델 목록(`gemini-3.8-flash-low`,
+`gemini-3.1-pro-low`, `claude-sonnet-4-6` 등)에서 모델을 고르며, 답변 첫 줄에
+`[Jev] routed this turn to …`로 결과를 보여 줍니다. 이 줄은 모델의 첫 응답을 기다리지 않고
+Jev가 결정하는 즉시(약 0.5초) 표시됩니다. `-p`/`--print`도 같은 방식입니다.
+다른 모델을 직접 고르면 라우팅이 멈추고, 다시 **Jev Router (auto)**를 고르면 재개됩니다.
+도구 실행이 이어지는 동안에는 그 턴에 고른 모델을 유지합니다.
+
+AGY는 `CLOUD_CODE_URL` 환경 변수로 API 서버 주소를 바꿀 수 있습니다. `jev-agy`는 이 값을
+자식 프로세스에만 지정해 로컬 프록시를 거치게 하며, AGY 설치 파일과 `settings.json`,
+`config.json`은 바꾸지 않습니다. `jev-agy models` 같은 하위 명령은 프록시 없이 실행합니다.
 
 Codex에서는 모델 선택기에서 **Jev Router**를 고르면 매 턴 모델을 선택합니다.
 추론 노력은 기본값 `auto`에서 자동으로 선택하며, 계정의 모델 목록이 지원하는

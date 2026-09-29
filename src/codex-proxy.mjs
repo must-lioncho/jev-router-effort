@@ -3,7 +3,7 @@ import https from "node:https";
 import { createHash, randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { availableTiers, shouldUseExactModel } from "./config.mjs";
-import { askJev } from "./router.mjs";
+import { askJev, warmJev } from "./router.mjs";
 import { decide } from "./policy.mjs";
 import { log } from "./log.mjs";
 import { writeDecision, writeStatus } from "./status.mjs";
@@ -210,6 +210,7 @@ export async function startCodexProxy({
   route = askJev,
   statusId = "",
 } = {}) {
+  if (route === askJev) warmJev();
   const states = new Map();
   const models = new Map();
 

@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { accessSync, constants, copyFileSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -26,6 +26,18 @@ export function loadEnv() {
       process.loadEnvFile(file);
     } catch {
       // Missing or unreadable; values may still come from the real environment.
+    }
+  }
+  // The shared Jev CLI can store its credential in macOS Keychain. Keep it out
+  // of shell history and plaintext files; explicit environment settings win.
+  if (!process.env.JEV_API_KEY && !process.env.TYPESAFE_API_KEY && process.platform === "darwin") {
+    try {
+      const key = execFileSync("security", ["find-generic-password", "-s", "typesafe-ai-api", "-w"], {
+        encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 3000,
+      }).trim();
+      if (key) process.env.TYPESAFE_API_KEY = key;
+    } catch {
+      // Keep the existing unauthenticated fallback if Keychain is unavailable.
     }
   }
 }
@@ -98,6 +110,9 @@ export async function runCodex() {
   }
 
   let args = process.argv.slice(2);
+  // Orca's account-specific CODEX_HOME can exceed the macOS Unix socket path
+  // limit. Avoid the managed daemon without altering running sessions.
+  if (!args.includes("--no-daemon")) args = ["--no-daemon", ...args];
   let close = () => {};
   const statusId = `codex-${process.pid}`;
   process.env.JEV_CODEX_STATUS_ID = statusId;

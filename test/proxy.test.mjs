@@ -76,7 +76,7 @@ test("routing status retains the exact recent Jev exchanges", () => {
 
 test("recognises older model versions within a tier", () => {
   assert.equal(tierOf("claude-sonnet-4-6"), "sonnet");
-  assert.equal(tierOf("claude-sonnet-5"), "sonnet");
+  assert.equal(tierOf("claude-sonnet-5-5"), "sonnet");
   assert.equal(tierOf("claude-haiku-4-5-20251001"), "haiku");
   assert.equal(tierOf("claude-opus-4-1"), "opus");
   assert.equal(tierOf("claude-fable-5-1[1m]"), "fable");
@@ -87,11 +87,11 @@ test("recognises older model versions within a tier", () => {
 test("keeps available Claude model versions as separate Jev choices", () => {
   assert.deepEqual(
     claudeModels([
-      { id: "claude-opus-5", display_name: "Claude Opus 5" },
+      { id: "claude-opus-5-5", display_name: "Claude Opus 5" },
       { id: "claude-opus-4-8", display_name: "Claude Opus 4.8" },
     ]).map(({ id, tier }) => ({ id, tier })),
     [
-      { id: "claude-opus-5", tier: "opus" },
+      { id: "claude-opus-5-5", tier: "opus" },
       { id: "claude-opus-4-8", tier: "opus" },
     ],
   );
@@ -107,9 +107,9 @@ test("Claude proxy sends exact account models to Jev and routes the chosen versi
         res.setHeader("content-type", "application/json");
         return res.end(JSON.stringify({
           data: [
-            { id: "claude-opus-5", display_name: "Claude Opus 5" },
+            { id: "claude-opus-5-5", display_name: "Claude Opus 5" },
             { id: "claude-opus-4-8", display_name: "Claude Opus 4.8" },
-            { id: "claude-sonnet-5", display_name: "Claude Sonnet 5" },
+            { id: "claude-sonnet-5-5", display_name: "Claude Sonnet 5" },
           ],
         }));
       }
@@ -125,9 +125,9 @@ test("Claude proxy sends exact account models to Jev and routes the chosen versi
     upstreamURL: `http://127.0.0.1:${upstream.address().port}`,
     route: async ({ models }) => {
       assert.deepEqual(models.map((model) => model.id), [
-        "claude-opus-5",
+        "claude-opus-5-5",
         "claude-opus-4-8",
-        "claude-sonnet-5",
+        "claude-sonnet-5-5",
       ]);
       return { choice: "claude-opus-4-8", confidence: 0.91, ms: 1 };
     },
@@ -155,7 +155,7 @@ test("Claude routes effort with the model and pins it across tool continuations"
     for await (const chunk of req) raw += chunk;
     sent.push(JSON.parse(raw));
     res.setHeader("content-type", "application/json");
-    res.end('{"id":"msg_1","type":"message","model":"claude-sonnet-5"}');
+    res.end('{"id":"msg_1","type":"message","model":"claude-sonnet-5-5"}');
   });
   await new Promise((resolve) => upstream.listen(0, "127.0.0.1", resolve));
   t.after(() => upstream.close());
@@ -166,7 +166,7 @@ test("Claude routes effort with the model and pins it across tool continuations"
       calls++;
       assert.deepEqual(efforts, ["low", "medium", "high"]);
       assert.equal(currentEffort, "high");
-      return { choice: "claude-sonnet-5", confidence: 0.8, effort: "low", effortConfidence: 0.9 };
+      return { choice: "claude-sonnet-5-5", confidence: 0.8, effort: "low", effortConfidence: 0.9 };
     },
   });
   t.after(close);
@@ -178,10 +178,10 @@ test("Claude routes effort with the model and pins it across tool continuations"
   await (await post(first)).text();
   await (await post([...first, { role: "assistant", content: [{ type: "tool_use", id: "t", name: "Bash" }] },
     { role: "user", content: [{ type: "tool_result", tool_use_id: "t", content: "done" }] }])).text();
-  await (await post(first, "claude-opus-5")).text();
+  await (await post(first, "claude-opus-5-5")).text();
   assert.equal(calls, 1);
   assert.deepEqual(sent.map((body) => body.output_config.effort), ["low", "low", "high"]);
-  assert.deepEqual(sent.map((body) => body.model), ["claude-sonnet-5", "claude-sonnet-5", "claude-opus-5"]);
+  assert.deepEqual(sent.map((body) => body.model), ["claude-sonnet-5-5", "claude-sonnet-5-5", "claude-opus-5-5"]);
 });
 
 test("Claude effort falls back to the client setting and omits effort for Haiku", () => {
@@ -190,7 +190,7 @@ test("Claude effort falls back to the client setting and omits effort for Haiku"
   assert.equal(claudeEffort("opus", null, "unsupported"), null);
   assert.equal(claudeEffort("haiku", "low", "high"), null);
   assert.match(routingNotice({ model: "claude-haiku-4-5-20251001", effort: null, confidence: 0.65, reason: "jev" }), /effort n\/a/);
-  assert.match(routingNotice({ model: "claude-sonnet-5", effort: null, confidence: 0.65, reason: "jev" }), /effort unset/);
+  assert.match(routingNotice({ model: "claude-sonnet-5-5", effort: null, confidence: 0.65, reason: "jev" }), /effort unset/);
 });
 
 test("routing notice prefixes the first real text without corrupting tool blocks", async () => {
@@ -205,7 +205,7 @@ test("routing notice prefixes the first real text without corrupting tool blocks
     frame("content_block_stop", { index: 1 }),
     frame("message_stop", {}),
   ].join("");
-  const stream = prependRoutingNotice("[Jev] routed this turn to claude-sonnet-5 (effort auto → low).");
+  const stream = prependRoutingNotice("[Jev] routed this turn to claude-sonnet-5-5 (effort auto → low).");
   const chunks = [];
   stream.on("data", (chunk) => chunks.push(chunk));
   stream.write(Buffer.from(input.slice(0, 23)));
@@ -218,7 +218,7 @@ test("routing notice prefixes the first real text without corrupting tool blocks
     "content_block_start", "content_block_delta", "content_block_stop", "message_stop",
   ]);
   assert.equal(events[2].delta.partial_json, "{}");
-  assert.equal(events[5].delta.text, "[Jev] routed this turn to claude-sonnet-5 (effort auto → low).\nDone.");
+  assert.equal(events[5].delta.text, "[Jev] routed this turn to claude-sonnet-5-5 (effort auto → low).\nDone.");
   assert.deepEqual(events.slice(1, 4).map((event) => event.index), [0, 0, 0]);
   assert.deepEqual(events.slice(4, 7).map((event) => event.index), [1, 1, 1]);
 });
@@ -229,7 +229,7 @@ test("Claude proxy shows the routing decision before the model's first streamed 
     assert.equal(req.headers["accept-encoding"], undefined, "routed SSE must remain uncompressed");
     for await (const _chunk of req) { /* Drain request. */ }
     res.setHeader("content-type", "text/event-stream");
-    res.write(frame("message_start", { message: { id: "msg_1", model: "claude-sonnet-5" } }));
+    res.write(frame("message_start", { message: { id: "msg_1", model: "claude-sonnet-5-5" } }));
     res.write(frame("content_block_start", { index: 0, content_block: { type: "text", text: "" } }));
     res.write(frame("content_block_delta", { index: 0, delta: { type: "text_delta", text: "Done." } }));
     res.write(frame("content_block_stop", { index: 0 }));
@@ -239,7 +239,7 @@ test("Claude proxy shows the routing decision before the model's first streamed 
   t.after(() => upstream.close());
   const { port, close } = await startProxy({
     upstreamURL: `http://127.0.0.1:${upstream.address().port}`,
-    route: async () => ({ choice: "claude-sonnet-5", effort: "low", confidence: 0.91 }),
+    route: async () => ({ choice: "claude-sonnet-5-5", effort: "low", confidence: 0.91 }),
   });
   t.after(close);
   const response = await fetch(`http://127.0.0.1:${port}/v1/messages`, {
@@ -261,7 +261,7 @@ test("a routed request without metadata is recorded under the conversation key",
     req.on("data", () => {});
     req.on("end", () => {
       res.setHeader("content-type", "application/json");
-      res.end('{"id":"msg_1","type":"message","model":"claude-sonnet-5"}');
+      res.end('{"id":"msg_1","type":"message","model":"claude-sonnet-5-5"}');
     });
   });
   await new Promise((resolve) => upstream.listen(0, "127.0.0.1", resolve));
@@ -269,7 +269,7 @@ test("a routed request without metadata is recorded under the conversation key",
 
   const { port, close } = await startProxy({
     upstreamURL: `http://127.0.0.1:${upstream.address().port}`,
-    route: async () => ({ choice: "claude-sonnet-5", confidence: 0.77, ms: 1 }),
+    route: async () => ({ choice: "claude-sonnet-5-5", confidence: 0.77, ms: 1 }),
   });
   t.after(close);
 
@@ -423,7 +423,7 @@ test("routing to opus leaves thinking and effort intact", () => {
     output_config: { effort: "medium" },
   };
   applyTier(body, "opus");
-  assert.equal(body.model, "claude-opus-5");
+  assert.equal(body.model, "claude-opus-5-5");
   assert.deepEqual(body.thinking, { type: "adaptive" });
   assert.deepEqual(body.output_config, { effort: "medium" });
 });

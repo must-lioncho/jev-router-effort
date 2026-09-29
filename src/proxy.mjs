@@ -13,7 +13,7 @@ import {
   isAuto,
   shouldUseExactModel,
 } from "./config.mjs";
-import { askJev } from "./router.mjs";
+import { askJev, warmJev } from "./router.mjs";
 import { decide } from "./policy.mjs";
 import { log } from "./log.mjs";
 import { writeDecision, writeStatus } from "./status.mjs";
@@ -224,6 +224,7 @@ export function observeModel(state, current) {
 
 
 export async function startProxy({ upstreamURL = ANTHROPIC_BASE_URL, route = askJev } = {}) {
+  if (route === askJev) warmJev();
   // Tier routed for each conversation's turn in flight, reused by its follow-up requests and
   // by the cache-rebuild guard, which needs to know what the prompt cache was built on.
   const convos = new Map();

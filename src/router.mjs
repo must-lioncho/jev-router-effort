@@ -25,6 +25,17 @@ function getClient() {
 }
 
 /**
+ * Opens the TLS connection to Jev ahead of the first prompt, which otherwise pays the
+ * handshake (~750ms vs ~350ms warm). Fire-and-forget; failure only means a cold first call.
+ */
+export function warmJev() {
+  if (!(process.env.JEV_API_KEY ?? process.env.TYPESAFE_API_KEY)) return;
+  try {
+    getClient().fetch(getClient().baseURL, { method: "HEAD", signal: AbortSignal.timeout(THRESHOLDS.jevDeadlineMs) }).catch(() => {});
+  } catch {}
+}
+
+/**
  * Asks Jev which tier fits this prompt. Returns null on any failure, which the policy
  * layer reads as "keep the current model" — routing must never block a prompt.
  *
