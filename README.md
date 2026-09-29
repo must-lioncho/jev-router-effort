@@ -28,6 +28,7 @@ Each CLI retains its native interface, tools, sessions, permissions, and authent
 | `jev-claude` | Claude Code | Existing `claude login` | Status line |
 | `jev-codex` | OpenAI Codex | Existing `codex login` | Commentary line |
 | `jev-agy` / `jev -A` / `jev-a` / `jev-anti` / `jev-antigravity` | AGY (Antigravity CLI) | Existing AGY login | First streamed line |
+| `jev-glm` | ZAI CLI (`glm` / `zai`, z.ai GLM) | Existing z.ai key | First streamed line |
 
 All commands launch the real upstream CLI. Jev chooses a model at the start of each user
 turn.
@@ -110,6 +111,23 @@ AGY reads its API server from `CLOUD_CODE_URL`. `jev-agy` sets it for the child 
 a value you already exported becomes the proxy's upstream. AGY subcommands such as
 `jev-agy models` run without the proxy. Nothing in AGY's installation, `settings.json`, or
 `config.json` is changed.
+
+## GLM (`jev-glm`)
+
+`jev-glm` opens the ZAI CLI (the `glm` launcher when present, otherwise `zai`) and routes each
+user turn between `glm-5.3-flash`, `glm-5.2`, and `glm-5.3`, and sets z.ai's
+`reasoning_effort` to `low`, `high`, or `max`. The CLI's own picker only lists
+glm-4.6/4.5/4.5-air, so the proxy rewrites the model; the coding endpoint serves all three
+routed models. Tool continuations keep the turn's model and effort. Turning thinking off
+(`T`) stops the proxy from sending `reasoning_effort`.
+
+The ZAI CLI renders nothing until a model stream has fully ended, so a streamed note would
+only show with the answer. Instead the proxy answers each new turn with a synthetic `bash`
+call, `echo '[Jev] routed this turn to glm-5.3 (jev, confidence 0.71, effort max (0.90)).'`,
+which the CLI runs and shows as soon as Jev decides (about 0.4 s). The CLI then sends the
+echo's result back, the proxy removes that exchange from the history, and the real request
+goes to the routed model, so the model never reads the note. The decision is also written
+to the terminal tab title.
 
 ## Claude Code interface
 

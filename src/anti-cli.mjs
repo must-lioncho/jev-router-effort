@@ -12,9 +12,9 @@ const SUBCOMMANDS = new Set([
 ]);
 
 /** The official `agy` executable, or the older `antigravity` name when that is all there is. */
-export function resolveAnti(path = process.env.PATH ?? "") {
+export function resolveAnti(path = process.env.PATH ?? "", names = ["agy", "antigravity"]) {
   const win = process.platform === "win32";
-  for (const name of ["agy", "antigravity"]) {
+  for (const name of names) {
     for (const dir of path.split(win ? ";" : ":")) {
       if (!dir) continue;
       for (const ext of win ? [".exe", ".cmd", ".bat"] : [""]) {

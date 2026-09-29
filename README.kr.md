@@ -34,12 +34,22 @@ echo "JEV_API_KEY=..." > ~/.jev-router.env
 jev-claude
 # 또는 jev-codex
 # AGY: jev-agy
+# GLM: jev-glm
 ```
 
 [TypeSafe](https://docs.typesafe.ai)에서 Jev API 키를 받을 수 있습니다. `jev-claude`와
 `jev-codex`는 각각 기존 CLI의 로그인과 도구를 사용합니다. `JEV_API_KEY`가 없으면
 라우팅 없이 해당 CLI를 실행합니다. `npm install -g jev-router`는 이 버전이 아닌
 원작자의 npm 패키지를 설치합니다.
+
+## GLM: `jev-glm`
+
+`jev-glm`은 ZAI CLI(`glm` 런처, 없으면 `zai`)를 열고 매 턴 `glm-5.3-flash`, `glm-5.2`,
+`glm-5.3` 중 모델과 z.ai `reasoning_effort`(`low`/`high`/`max`)를 Jev가 고릅니다. CLI 선택기에는
+glm-4.6/4.5/4.5-air만 있어 프록시가 모델을 바꿔 보냅니다. thinking을 끄면(`T`) effort는 보내지 않습니다.
+ZAI CLI는 응답 스트림이 끝나야 화면을 그리므로, 프록시가 매 턴 첫 응답으로 `echo '[Jev] routed this turn to …'`
+도구 호출을 돌려주고 CLI가 그것을 즉시(약 0.4초) 표시합니다. 그 결과가 돌아오면 프록시가 그 교환을 지우고
+실제 요청을 선택된 모델로 보내므로 모델은 이 줄을 읽지 않습니다.
 
 ## Antigravity: `jev-agy`
 
@@ -50,7 +60,7 @@ jev-claude
 jev-agy
 jev -A
 jev-agy -p "코드에서 경쟁 상태를 찾아줘"
-jev-antigravity --model claude-sonnet-4-6 -p "이 파일을 요약해줘"
+jev-antigravity --model gemini-3.1-pro-low -p "이 파일을 요약해줘"
 ```
 
 `jev-agy`는 `/model`에 **Jev Router (auto)**를 추가하고 그 항목으로 시작합니다. 대화 중

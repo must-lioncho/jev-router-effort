@@ -17,6 +17,7 @@
     "jev-antigravity": "bin/jev-anti.mjs",
     "jev-claude": "bin/jev-claude.mjs",
     "jev-codex": "bin/jev-codex.mjs",
+    "jev-glm": "bin/jev-glm.mjs",
     "jev-explain": "bin/jev-explain.mjs"
   },
   "scripts": {
