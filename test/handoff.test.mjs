@@ -344,6 +344,22 @@ test("a newer packet reaches an executor that never received the first one", asy
   }), { code: "duplicate" });
 });
 
+test('read-only evaluation overrides generic writer authority in both packet and Orca prompt', async t => {
+  const { dir, checkpoint } = await workspace(t);
+  const fake = fakeOrca(dir);
+  const receipt = await run(dir, checkpoint, fake.orca, { packet: { ...PACKET, authority: 'read-only', stage: 'evaluation',
+    context: { instructions: 'Original implementation objective', items: [{ role: 'assistant', text: 'tests exit 0' }] } } });
+  const doc = readFileSync(receipt.packetPath, 'utf8');
+  assert.match(doc, /READ-ONLY EVALUATION/);
+  assert.match(doc, /no workspace write authority/);
+  assert.match(doc, /No commits are authorized/);
+  assert.doesNotMatch(doc, /You are the single writer/);
+  assert.match(doc, /Before evaluation run:/);
+  assert.match(doc, /tests exit 0/);
+  const send = fake.calls.find(args => args[0] === 'terminal' && args[1] === 'send');
+  assert.match(send[send.indexOf('--text') + 1], /read-only evaluator with no file edits or commits/);
+});
+
 test("launch commands quote safely for the shell Orca types into", () => {
   assert.equal(shellQuote("plain-1.2"), "plain-1.2");
   assert.equal(shellQuote("it's"), `'it'\\''s'`);

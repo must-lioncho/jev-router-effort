@@ -97,18 +97,26 @@ const receipt = await handoffTask({
   24 hours (`CATALOG_MAX_AGE_MS`) and not more than 5 minutes in the future. The catalog comes
   from the caller's verified evidence or live model catalog; the module never maps tiers or
   aliases to models. A listing proves the launch is available, not that the model suits the
-  task; suitability comes from the evidence policy. Codes: `unsupported_target`, `catalog_stale`.
+  task; selection comes from supported outcome policy or a separately labeled, explicitly configured user evaluation preference. Codes: `unsupported_target`, `catalog_stale`.
   The receipt records the entry's `evidence` and `checkedAt`.
 - `checkpoint` is a successful `ensureCheckpoint` receipt for the same task whose ref still
   resolves to its commit (`checkpoint_required`, `checkpoint_mismatch`).
 - `packet` is either `{ file }` or the runtime packet from `src/task-runtime.mjs`:
   `objective` (required), `currentRequest`, `recentRequests[]`, `failures[]` (strings or
   `{ text, source }`), `taskType`, `complex`, `mutating`, `signals[]`, `sourceCli`, `stateFile`,
-  `evidenceRule`, plus optional `constraints[]`, `stage`, `affectedFiles[]`, `verification[]`,
-  `context`. Unknown fields are rendered under "Other fields" rather than dropped. The rendered
+  `evidenceRule`, `routingSelection`, plus optional `constraints[]`, `stage`, `affectedFiles[]`, `verification[]`,
+  `context`, `authority`. `routingSelection.kind` is `outcome-evidence` (rule id/support) or
+  `user-preference` (preference id/provenance/reason); the latter never implies measured quality.
+  `authority: "read-only"` grants evaluation ownership with no workspace write permission.
+  Both the packet header and Orca's submitted prompt say no edits or commits, overriding generic
+  writer/executor instructions. Unknown fields are rendered under "Other fields" rather than dropped. The rendered
   packet must fit `maxPacketBytes` (64 KiB): older recent requests and failures are dropped with
   a visible count, the newest of each last; the objective and current request are never cut.
   A packet still too large is refused (`packet_too_large`, `invalid_packet`).
+  The runtime transfers the whole objective and current request, with receiver-only Codex
+  instructions, assistant artifacts and tool/check output in private `context`. Essential
+  context is never silently truncated. Non-text unavailable content carries explicit omission
+  metadata. Private packets stay in the Git common directory, not the working tree or classifier request.
 - `executor_unavailable`: the named executor is not installed (see below).
 - `writer_locked`: another call is handling the same task. `task_owned`: a terminal was
   already launched for the task with a different target. Before anything is sent, a newer
@@ -180,3 +188,6 @@ report and verifies it separately.
   (`permission`) and the receipt stays `accepted_unverified`.
 - Readiness uses Orca's `tui-idle` detection. A CLI that Orca cannot classify will time out as
   `not_started`.
+- Evaluation read-only authority is an explicit executor contract, not an OS sandbox. The
+  coordinator verifies the result and actual workspace changes separately. Quota refusal,
+  a catalog listing, or successful prompt delivery does not demonstrate task completion.

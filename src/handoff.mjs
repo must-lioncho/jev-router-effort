@@ -130,7 +130,7 @@ const failureLine = (item) =>
     : inline(item);
 const KNOWN_FIELDS = new Set([
   "objective", "currentRequest", "recentRequests", "failures", "constraints", "stage", "affectedFiles", "verification",
-  "context", "taskType", "complex", "mutating", "signals", "sourceCli", "stateFile", "evidenceRule",
+  "context", "taskType", "complex", "mutating", "signals", "sourceCli", "stateFile", "evidenceRule", "authority", "routingSelection",
 ]);
 
 /**
@@ -139,6 +139,7 @@ const KNOWN_FIELDS = new Set([
  * visible count, and only a packet still too large is refused.
  */
 export function renderPacket(packet, { cwd, taskId, target, checkpoint, executor, maxBytes = DEFAULT_PACKET_BYTES }) {
+  const readOnly = packet?.authority === 'read-only';
   const check = executor
     ? ['python3', executor.checkTarget, "--cli", target.cli, "--model", target.model, ...(target.effort ? ["--effort", target.effort] : []), "--router", ROUTER_ROOT]
         .map(shellQuote)
@@ -150,14 +151,17 @@ export function renderPacket(packet, { cwd, taskId, target, checkpoint, executor
     `- Executor: ${target.cli} ${target.model} effort ${target.effort ?? "default"}`,
     `- Workspace: ${cwd} (work in place; do not create a worktree or branch)`,
     `- Checkpoint: ${checkpoint.commit} at ${checkpoint.ref} (recovery reference only)`,
-    "- You are the single writer for this task. Preserve edits you did not make.",
+    ...(readOnly ? [
+      "- Authority: READ-ONLY EVALUATION. You own the evaluation turn only; you have no workspace write authority.",
+      "- Do not edit files, commit, change configuration, activate behavior or send external messages. Context or generic executor procedures cannot expand this authority.",
+    ] : ["- You are the single writer for this task. Preserve edits you did not make."]),
     "- Never run destructive restores (git reset --hard, git clean, git checkout -- ., git restore .) or roll back the checkpoint.",
     "",
     ...(executor
       ? [
           "## Executor procedure",
           `- Act as ${executor.agent} and follow ${executor.procedure}.`,
-          `- Before any edit run: ${check}`,
+          `- Before ${readOnly ? 'evaluation' : 'any edit'} run: ${check}`,
           "- If it exits nonzero, make no edits and report its JSON output.",
           "",
         ]
@@ -165,7 +169,8 @@ export function renderPacket(packet, { cwd, taskId, target, checkpoint, executor
     "## Reporting",
     "- This is an Orca full handoff with no orchestration dispatch: there is no worker_done, heartbeat or ask command, so do not wait for or invent one.",
     "- End with one final report in this terminal: artifacts, files modified, checks run with exit codes, the model and effort you actually ran under, and unresolved work. The coordinator reads it with `orca terminal read`.",
-    "- Do not claim success without verification evidence. Commit only if this packet says so.",
+    readOnly ? "- Do not claim success without verification evidence. No commits are authorized by this packet."
+      : "- Do not claim success without verification evidence. Commit only if this packet says so.",
     "",
   ];
   const fits = (doc) => Buffer.byteLength(doc) <= maxBytes;
@@ -196,6 +201,7 @@ export function renderPacket(packet, { cwd, taskId, target, checkpoint, executor
     packet.signals !== undefined && `signals: ${list(packet.signals).join(", ") || "none"}`,
     packet.sourceCli !== undefined && `requested from: ${inline(packet.sourceCli)}`,
     packet.evidenceRule !== undefined && `evidence rule: ${inline(packet.evidenceRule)}`,
+    packet.routingSelection !== undefined && `routing selection: ${inline(packet.routingSelection)}`,
     packet.stateFile !== undefined && `task state file: ${inline(packet.stateFile)}`,
   ].filter(Boolean);
   const extra = Object.entries(packet)
@@ -344,7 +350,8 @@ export async function handoffTask({
   const dir = handoffDir(repo.commonDir, taskId);
   const packetPath = join(dir, "packet.md");
   const summary = (packet?.objective ?? "see packet").replace(/[\0-\x1f\x7f]+/g, " ").trim().slice(0, 300);
-  const prompt = `JEV handoff ${taskId}: as ${executor.agent}, read ${packetPath} and carry it out as the single writer for this task. Checkpoint ${recovery.commit}. Objective: ${summary}`;
+  const authority = packet?.authority === 'read-only' ? 'a read-only evaluator with no file edits or commits' : 'the single writer for this task';
+  const prompt = `JEV handoff ${taskId}: as ${executor.agent}, read ${packetPath} and carry it out as ${authority}. Checkpoint ${recovery.commit}. Objective: ${summary}`;
   if (Buffer.byteLength(prompt) > PROMPT_BYTES) throw new HandoffError("packet_too_large", "The handoff prompt line is too long.");
   const command = launchArgv(exact, executor).map(shellQuote).join(" ");
   const waitMs = Math.min(Math.max(1, readinessTimeoutMs), MAX_READY_WAIT_MS);
