@@ -82,7 +82,7 @@ const textOf = (content) => {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
   return content
-    .filter((item) => item?.type === "text" || item?.type === "input_text")
+    .filter((item) => item?.type === "text" || item?.type === "input_text" || item?.type === "output_text")
     .map((item) => item.text)
     .join("\n");
 };
@@ -166,6 +166,40 @@ export function codexConversationKey(body) {
     body?.client_metadata?.["x-codex-turn-metadata"] ??
     `${body?.instructions ?? ""}|${textOf(body?.input?.find((item) => item?.role === "user")?.content)}`;
   return createHash("sha1").update(String(stable)).digest("hex").slice(0, 12);
+}
+
+/** Receiver-only textual context. Never send instructions/artifacts/tool output to Jev. */
+export function codexHandoffContext(body) {
+  const items = [];
+  for (const item of body?.input ?? []) {
+    if (item?.type === 'additional_tools') continue;
+    const entry = { type: item.type ?? 'message', ...(item.role ? { role: item.role } : {}) };
+    if (item.call_id) entry.callId = item.call_id;
+    if (item.name) entry.name = item.name;
+    if (item.arguments !== undefined) entry.arguments = item.arguments;
+    const text = textOf(item.content);
+    if (text) entry.text = text;
+    if (item.output !== undefined) entry.output = item.output;
+    if (Array.isArray(item.content)) {
+      const nonText = item.content.filter(part => !['text', 'input_text', 'output_text'].includes(part?.type));
+      if (nonText.length) entry.unavailableContent = nonText.map(part => ({ type: part?.type ?? 'unknown',
+        reason: 'Non-text content not transferred; inspect the original conversation if needed.' }));
+    }
+    if (!entry.text && entry.output === undefined && entry.arguments === undefined && !entry.unavailableContent) {
+      entry.unavailableContent = [{ type: item.type ?? 'unknown', reason: 'No transferable text in this input item.' }];
+    }
+    items.push(entry);
+  }
+  return { instructions: body?.instructions ?? '', items };
+}
+
+/** Instruction-only user messages belong to receiver context, not the task objective. */
+export function codexTaskHistory(body) {
+  return (body?.input ?? []).filter(item => item?.role === 'user')
+    .map(item => cleanPrompt(textOf(item.content)))
+    .filter(prompt => prompt && !isCodexAuxiliaryPrompt(prompt)
+      && !/^#\s*AGENTS\.md instructions for\b/i.test(prompt)
+      && !/^<INSTRUCTIONS>[\s\S]*<\/INSTRUCTIONS>\s*$/i.test(prompt));
 }
 
 export function addJevModel(catalog) {
@@ -272,11 +306,13 @@ export async function startCodexProxy({
   describeDeadlineMs = DESCRIBE_DEADLINE_MS,
   statusId = "",
   runtimeConfig,
+  checkpoint,
+  handoff,
   cwd = process.cwd(),
   workspaceError,
 } = {}) {
   if (route === askJev) warmJev();
-  const tasks = createTaskRuntime({ cli: "codex", route, cwd, workspaceError, config: runtimeConfig ?? (route !== askJev ? { enabled: false } : undefined) });
+  const tasks = createTaskRuntime({ cli: "codex", route, cwd, workspaceError, checkpoint, handoff, config: runtimeConfig ?? (route !== askJev ? { enabled: false } : undefined) });
   const states = new Map();
   const models = new Map();
 
@@ -343,7 +379,8 @@ export async function startCodexProxy({
                 : null;
               const jev = await tasks.route({
                 taskKey: key,
-                taskHistory: body.input.filter(i => i.role === "user").map(i => cleanPrompt(textOf(i.content))).filter(p => p && !isCodexAuxiliaryPrompt(p)),
+                taskHistory: codexTaskHistory(body),
+                localContext: codexHandoffContext(body),
                 manualEffort: effortMode === "manual" ? requestedEffort : null,
                 prompt: withImageDescriptions(prompt, images.length, descriptions),
                 current: currentModel,

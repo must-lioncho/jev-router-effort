@@ -1,10 +1,28 @@
 import { readFileSync } from 'node:fs';
 
-export const TASK_TYPES = ['cross-module-change', 'local-code-change', 'analysis', 'writing', 'research', 'operations', 'general'];
+export const TASK_TYPES = ['cross-module-change', 'local-code-change', 'evaluation', 'analysis', 'writing', 'research', 'operations', 'general'];
+
+const KOREAN_ACTIONS = '구현|개발|수정|추가|복구|적용|작성|변경|삭제|편집|배포|커밋|리팩터링|리팩토링|푸시|업로드|게시|발행|병합|머지|반영';
+const KOREAN_PARTICLE = '(?:을|를|도|은|는)?';
+const KOREAN_NEGATION = new RegExp(`(?:${KOREAN_ACTIONS}|고치|지우|만들)${KOREAN_PARTICLE}(?:하)?\\s*(?:하지\\s*말(?:고|아)|하지\\s*마|지\\s*말(?:고|아)|지\\s*마|지\\s*않(?:고|아))`, 'g');
+const KOREAN_MUTATION = new RegExp(`(?:${KOREAN_ACTIONS})${KOREAN_PARTICLE}\\s*(?:해|하|할|및|후|바랍니다|요청|부탁|진행|수행|완료)|(?:${KOREAN_ACTIONS})\\s*[.!?。]?\\s*$|고쳐|고치(?:고|면|자|라|세요)|지워|지우(?:고|면|자|세요)|지울|만들어`);
+const activeKorean = text => text.replace(KOREAN_NEGATION, '');
+
+/** Prefer abstention for mixed edit/review requests; this identifies authority, not quality. */
+export function isEvaluationRequest(text = '') {
+  if (!/평가|검토|채점|리뷰|\b(?:evaluat(?:e|ion|ing)|review(?:er|ing)?|qa|grade|grading)\b/i.test(text)) return false;
+  const active = activeKorean(text)
+    .replace(/\b(?:do not|don't|without)\s+(?:edit|modify|fix|write|change)(?:ing)?\b/gi, '')
+    .replace(/\b(?:the|this|that|existing|completed|proposed)\s+(?:fix|patch|build|change|update)\b/gi, 'artifact');
+  return !KOREAN_MUTATION.test(active)
+    && !/\b(?:implement|build|develop|fix|refactor|restore|deploy|create|add|edit|modify|write|delete|remove|commit|push|update|patch|change|rename)\b/i.test(active);
+}
 
 /** Conservative task signals, not a model-quality judgement. Length is never a signal. */
 export function taskProfile(text = '') {
-  const change = /구현|개발|만들|수정|고쳐|고치|추가|복구|실행|적용|implement|build|develop|fix|refactor|restore|deploy|create|add\b/i.test(text);
+  if (isEvaluationRequest(text)) return { taskType: 'evaluation', complex: false, signals: ['evaluation'], mutating: false };
+  const change = KOREAN_MUTATION.test(activeKorean(text))
+    || /구현|개발|만들|수정|고쳐|고치|추가|복구|실행|적용|implement|build|develop|fix|refactor|restore|deploy|create|add\b/i.test(text);
   const signals = {
     integration: /플러그인|모듈|기존.{0,20}(앱|메뉴|코드)|plugin|cross.module|integrat|architecture/i.test(text),
     workflow: /승인|거절|검수|상태|자동.{0,10}발행|approve|reject|workflow|state.machine/i.test(text),
@@ -21,6 +39,26 @@ export function taskProfile(text = '') {
           : /조사|검색|찾아|research|search/i.test(text) ? 'research'
             : change ? 'operations' : 'general';
   return { taskType, complex, signals: coupled, mutating: change };
+}
+
+/** User instructions authorize selection separately from observed success/failure rules. */
+export function selectRoutingPreference({ preferences = [], taskType, cli, externalModels = [], manualEffort = null, policy, now }) {
+  if (taskType !== 'evaluation' || manualEffort !== null || !Array.isArray(preferences)) return null;
+  for (const preference of preferences) {
+    const target = preference?.target;
+    if (preference?.sourceCli !== cli || preference.taskType !== taskType || preference.provenance?.kind !== 'user-preference'
+      || typeof preference.provenance.source !== 'string' || !preference.provenance.source.trim()
+      || typeof preference.id !== 'string' || !preference.id.trim() || typeof preference.reason !== 'string' || !preference.reason.trim()
+      || !['claude', 'codex'].includes(target?.cli) || target.cli === cli || typeof target.model !== 'string'
+      || !(target.effort === null || typeof target.effort === 'string')) continue;
+    const model = externalModels.find(m => m.cli === target.cli && m.id === target.model);
+    if (!model?.efforts?.includes(target.effort)) continue;
+    if ((policy?.rules ?? []).some(r => r.taskType === taskType && r.cli === target.cli && r.model === target.model
+      && r.outcome === 'avoid' && (r.effort === null || r.effort === target.effort) && supportedRule(r, policy, now))) continue;
+    return { kind: 'external', target, selection: { kind: 'user-preference', preferenceId: preference.id,
+      provenance: preference.provenance, reason: preference.reason } };
+  }
+  return null;
 }
 
 export function loadEvidencePolicy(path) {
