@@ -1,6 +1,6 @@
 # Result: model, skill and optional agent routing with evaluation logs
 
-Status: implemented, tested and checked live on Claude Code and Codex. The feature is off by default. Lion's runtime config was not changed. Activation is a separate decision (see "Activation").
+Status: implemented, tested and checked live on Claude Code and Codex. The distributable default is off. After Lion chose option 1, Lion's local runtime config was set to `recommend` mode (see "Activation").
 
 Executor: native Claude Code, agent `jev-router-improver`. The system reported the model as `claude-opus-5-5`. Lion saw high effort in the TUI. This session cannot read its own effort value.
 
@@ -100,7 +100,17 @@ Effects on this change:
 
 ## Activation
 
-Not activated. To enable it for Lion, add `"capabilityRouting": { "mode": "recommend" }` or `"apply"` to `~/.config/jev-router/runtime.json`, then start new `jev-claude`/`jev-codex` processes. Running sessions are not affected. Rollback: remove the field or set `"off"`.
+2026-10-04, after the commit that added this file: Lion chose option 1. I added `"capabilityRouting": { "mode": "recommend" }` to `~/.config/jev-router/runtime.json`.
+
+- Backup: `~/.config/jev-router/runtime.json.before-capability-recommend-20261004`. All other fields are equal to the backup. The file mode is back to 0600.
+- A new process loads the config and reports mode `recommend`, with the log at `~/.local/state/jev-router/routing-events.jsonl`.
+- I did not make a live request with this config, so the live log has no test entries.
+- Running sessions are not affected.
+- Rollback: restore the backup, or set `"mode": "off"`.
+
+Original activation notes:
+
+Not activated at first. To enable it for Lion, add `"capabilityRouting": { "mode": "recommend" }` or `"apply"` to `~/.config/jev-router/runtime.json`, then start new `jev-claude`/`jev-codex` processes. Running sessions are not affected. Rollback: remove the field or set `"off"`.
 
 - `recommend` logs and shows selections without changing requests.
 - `apply` also puts the skill text into the user's turn.
