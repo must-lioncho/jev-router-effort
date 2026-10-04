@@ -11,6 +11,8 @@ const hash = text => createHash('sha256').update(text).digest('hex').slice(0, 24
 const bounded = value => String(value ?? '').slice(0, 6000);
 const failure = text => /깨졌|깨먹|날려|안\s?돼|안\s?되|실패|잘못|틀렸|regression|broken|failed|incorrect|doesn.t work/i.test(text);
 const newTask = text => /^\s*(?:\/new-task\b|새\s*(?:작업|주제)\s*[:：]|new task\s*:)/i.test(text);
+/** Whether a prompt explicitly starts a new objective. */
+export const isNewTaskPrompt = text => newTask(String(text ?? ''));
 
 export class RoutingHoldError extends Error {
   constructor(message, detail = {}) { super(message); this.name = 'RoutingHoldError'; this.routingHold = true; this.detail = detail; }
@@ -33,7 +35,7 @@ function save(file, value) {
 export function createTaskRuntime({ cli, route, cwd = process.cwd(), workspaceError, config, checkpoint, handoff, now = Date.now } = {}) {
   // Config errors are deliberately not treated as 'Jev unavailable'.
   config ??= runtimeConfig();
-  if (!config.enabled) return { route, assertLocal() {}, assertModel() {} };
+  if (!config.enabled) return { route, assertLocal() {}, assertModel() {}, taskIdFor: () => null, config };
   const stateDir = config.stateDir ?? join(homedir(), '.local/state/jev-router');
   const fileFor = key => join(stateDir, 'tasks', `${hash(`${resolve(cwd)}:${cli}:${key}`)}.json`);
   const read = key => {
@@ -181,6 +183,9 @@ export function createTaskRuntime({ cli, route, cwd = process.cwd(), workspaceEr
   return {
     assertLocal,
     assertModel,
+    config,
+    /** Persisted task id for log correlation, or null before the first routed turn. */
+    taskIdFor: key => { try { return read(key)?.id ?? null; } catch { return null; } },
     route(input) {
       const key = input.taskKey ?? 'default';
       const prior = inFlight.get(key) ?? Promise.resolve();

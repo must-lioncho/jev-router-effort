@@ -6,6 +6,7 @@ import { availableTiers, shouldUseExactModel } from "./config.mjs";
 import { askJev, warmJev } from "./router.mjs";
 import { decide } from "./policy.mjs";
 import { createTaskRuntime, sendRoutingHold } from "./task-runtime.mjs";
+import { createCapabilityRuntime } from "./capability-runtime.mjs";
 import { log } from "./log.mjs";
 import { writeDecision, writeStatus } from "./status.mjs";
 import {
@@ -269,7 +270,7 @@ export const upstreamFor = (
   apiBaseURL = API_BASE_URL,
 ) => /\/models(?:\?|$)/.test(path) || headers["chatgpt-account-id"] ? chatgptBaseURL : apiBaseURL;
 
-export function jevDecisionEvents({ tier, model = codexModelOf(tier), effort, effortMode, confidence, effortConfidence, reason }) {
+export function jevDecisionEvents({ tier, model = codexModelOf(tier), effort, effortMode, confidence, effortConfidence, reason, capabilities = "" }) {
   const detail = confidence == null ? reason : `${reason}, confidence ${confidence.toFixed(2)}`;
   const effortDetail = effort
     ? effortMode === CODEX_AUTO_EFFORT
@@ -279,7 +280,7 @@ export function jevDecisionEvents({ tier, model = codexModelOf(tier), effort, ef
   const id = `jev-${randomUUID()}`;
   const text = reason.startsWith("jev-unavailable")
     ? `[Jev] unavailable; using ${model}. Add JEV_API_KEY=... to ~/.jev-router.env and restart jev-codex.`
-    : `[Jev] routed this turn to ${model} (${detail}${effortDetail}).`;
+    : `[Jev] routed this turn to ${model} (${detail}${effortDetail}).${capabilities ? ` ${capabilities}.` : ""}`;
   const item = {
     type: "message",
     role: "assistant",
@@ -315,6 +316,7 @@ export async function startCodexProxy({
   const tasks = createTaskRuntime({ cli: "codex", route, cwd, workspaceError, checkpoint, handoff, config: runtimeConfig ?? (route !== askJev ? { enabled: false } : undefined) });
   const states = new Map();
   const models = new Map();
+  const capabilities = createCapabilityRuntime({ cli: "codex", config: tasks.config, cwd });
 
   const server = http.createServer((req, res) => {
     const chunks = [];
@@ -322,6 +324,7 @@ export async function startCodexProxy({
     req.on("end", async () => {
       let out = Buffer.concat(chunks);
       let routing;
+      let capability = null;
       if (req.method === "POST" && /\/responses(?:\?|$)/.test(req.url ?? "")) {
         try {
           const body = JSON.parse(out.toString());
@@ -377,7 +380,9 @@ export async function startCodexProxy({
                     model: candidates.find((candidate) => candidate.tier === "haiku") ?? candidates[0],
                   })
                 : null;
+              capability = capabilities?.prepare({ prompt, conversationId: key, messageCount: body.input.length }) ?? null;
               const jev = await tasks.route({
+                ...(capability?.questions ? { capabilityQuestions: capability.questions } : {}),
                 taskKey: key,
                 taskHistory: codexTaskHistory(body),
                 localContext: codexHandoffContext(body),
@@ -411,6 +416,8 @@ export async function startCodexProxy({
                 effort,
               );
               states.set(key, { tier, model, effort, effortMode });
+              const capabilityResult = capabilities?.finalize(capability, { jev, taskId: tasks.taskIdFor(key), taskType: jev?.taskContext?.taskType ?? null,
+                model, effort, effortMode, modelReason: decision.reason, manualModel: false }) ?? { notice: "" };
               routing = {
                 prompt,
                 tier,
@@ -423,6 +430,9 @@ export async function startCodexProxy({
                 reason: decision.reason,
                 evidence: jev?.evidence ?? null,
                 checkpoint: jev?.checkpoint ?? null,
+                capabilities: capabilityResult.decision ?? null,
+                capabilityNotice: capabilityResult.notice,
+                requestId: capability?.requestId ?? null,
                 jev: jev ? { request: jev.request, response: jev.response } : null,
                 at: Date.now(),
               };
@@ -433,6 +443,7 @@ export async function startCodexProxy({
               body.reasoning ??= {};
               body.reasoning.effort = effort;
             }
+            capabilities?.inject(body, key);
             applyCodexTier(body, tier, models, model);
             tasks.assertModel({ taskKey: key, model, effort });
           } else {
@@ -442,6 +453,7 @@ export async function startCodexProxy({
           }
           out = Buffer.from(JSON.stringify(body));
         } catch (err) {
+          capabilities?.fail(capability, err?.routingHold ? "routing-hold" : "routing", err);
           if (sendRoutingHold(res, err)) return;
           res.writeHead(503, { "content-type": "application/json" });
           res.end(JSON.stringify({ error: { message: `Jev routing failed: ${err.message}`, type: "routing_error" } }));
@@ -485,6 +497,21 @@ export async function startCodexProxy({
             return;
           }
 
+          if (capability) {
+            const requestId = capability.requestId;
+            if (response.statusCode < 200 || response.statusCode >= 300) capabilities.served(requestId, { status: response.statusCode });
+            else {
+              let seen = "";
+              const onData = (chunk) => {
+                seen += chunk.toString("utf8");
+                const m = /"model"\s*:\s*"([^"]+)"/.exec(seen);
+                if (!m && seen.length < 8192) return;
+                response.off("data", onData);
+                capabilities.served(requestId, { status: response.statusCode, model: m?.[1] ?? null });
+              };
+              response.on("data", onData);
+            }
+          }
           const inspectForDecision = routing && response.statusCode >= 200 && response.statusCode < 300;
           if (inspectForDecision) delete responseHeaders["content-length"];
           res.writeHead(response.statusCode, responseHeaders);
@@ -502,7 +529,7 @@ export async function startCodexProxy({
             const first = pending.slice(0, end + 2);
             res.write(first);
             const isSSE = /^(?:event|data):/m.test(first);
-            if (isSSE) res.write(jevDecisionEvents(routing));
+            if (isSSE) res.write(jevDecisionEvents({ ...routing, capabilities: routing.capabilityNotice }));
             debug(`codex decision display ${isSSE ? "inject" : "skip"}`);
             res.write(pending.slice(end + 2));
             pending = "";

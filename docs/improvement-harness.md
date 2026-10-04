@@ -40,7 +40,7 @@ No config means original routing, with no new task-state writes or checkpointing
 }
 ```
 
-An empty policy retains existing cheap/mid/high model selection. Task context can improve the JEV judgement, but is not measured model performance. `JEV_RUNTIME_DISABLED=1` disables this opt-in layer. New proxy processes read the config; already-running terminals are not restarted or silently reconfigured.
+Optional `capabilityRouting` (`off` by default; `log`, `recommend`, `apply`) adds skill/agent selection, a private event log and label-based reports; see `capability-routing.md`. An empty policy retains existing cheap/mid/high model selection. Task context can improve the JEV judgement, but is not measured model performance. `JEV_RUNTIME_DISABLED=1` disables this opt-in layer. New proxy processes read the config; already-running terminals are not restarted or silently reconfigured.
 
 `externalModels` lists exact `{cli,id,efforts}` candidates for evidence selection; `externalCatalog` separately verifies exact launch availability with dated evidence (see `execution-safeguards.md`). Both must agree. Model suitability comes from supported policy rules, not presence in a CLI catalog. Do not invent catalog entries to force a handoff. Empty catalogs mean no automatic cross-CLI delegation.
 

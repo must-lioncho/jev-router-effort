@@ -51,7 +51,7 @@ export function routingContext(context) {
   };
 }
 
-export async function askJev({ prompt, current, currentEffort, contextTokens, models, efforts = [], taskContext }) {
+export async function askJev({ prompt, current, currentEffort, contextTokens, models, efforts = [], taskContext, capabilityQuestions }) {
   if (!models?.length) return null;
   const started = Date.now();
   const abort = new AbortController();
@@ -70,13 +70,18 @@ export async function askJev({ prompt, current, currentEffort, contextTokens, mo
       ...QUESTIONS,
       model: questionForModels(models),
       ...(efforts.length ? { effort: questionForEfforts(efforts) } : {}),
+      // Skill/agent choices ride on the same call, so they add no extra round trip.
+      ...(capabilityQuestions ?? {}),
     },
   };
   try {
     const result = await getClient().systemOne(request, { signal: abort.signal });
-    const { model: answer, effort, task_complexity, reasoning_required, tool_complexity } = result.answers;
+    const { model: answer, effort, task_complexity, reasoning_required, tool_complexity, skill, agent } = result.answers;
     return {
       ...answer,
+      capabilityAnswers: capabilityQuestions ? { skill: skill ?? null, agent: agent ?? null } : null,
+      routerModel: result.model ?? null,
+      usage: result.usage ? { inputTokens: result.usage.input_tokens, outputTokens: result.usage.output_tokens } : null,
       effort: effort?.choice ?? null,
       effortConfidence: effort?.confidence ?? null,
       effortProbabilities: effort?.probabilities ?? null,

@@ -16,6 +16,7 @@ import {
 import { askJev, warmJev } from "./router.mjs";
 import { decide } from "./policy.mjs";
 import { createTaskRuntime, sendRoutingHold } from "./task-runtime.mjs";
+import { createCapabilityRuntime } from "./capability-runtime.mjs";
 import { log } from "./log.mjs";
 import { writeDecision, writeStatus } from "./status.mjs";
 import {
@@ -40,11 +41,11 @@ export function claudeEffort(tier, recommended, previous) {
     : CLAUDE_MANUAL_EFFORTS.includes(previous) ? previous : null;
 }
 
-export function routingNotice({ model, effort, confidence, reason }) {
+export function routingNotice({ model, effort, confidence, reason, capabilities = "" }) {
   const detail = confidence == null ? reason : `${reason}, confidence ${confidence.toFixed(2)}`;
   const effortDetail = effort ? `effort auto → ${effort}`
     : tierSpec(tierOf(model))?.effort === false ? "effort n/a" : "effort unset";
-  return `[Jev] routed this turn to ${model} (${detail}, ${effortDetail}).`;
+  return `[Jev] routed this turn to ${model} (${detail}, ${effortDetail}).${capabilities ? ` ${capabilities}.` : ""}`;
 }
 
 /** Prefix the first real text delta so Claude Code's UI renders the decision. */
@@ -281,6 +282,8 @@ export async function startProxy({
 } = {}) {
   if (route === askJev) warmJev();
   const tasks = createTaskRuntime({ cli: "claude", route, cwd, workspaceError, config: runtimeConfig ?? (route !== askJev ? { enabled: false } : undefined) });
+  // Opt-in skill/agent routing and private event log; null unless runtime config enables it.
+  const capabilities = createCapabilityRuntime({ cli: "claude", config: tasks.config, cwd });
   // Tier routed for each conversation's turn in flight, reused by its follow-up requests and
   // by the cache-rebuild guard, which needs to know what the prompt cache was built on.
   const convos = new Map();
@@ -304,6 +307,7 @@ export async function startProxy({
       let out = Buffer.concat(chunks);
       let notice = null;
       let routingState = null;
+      let capability = null;
 
       if (/^\/v1\/messages/.test(req.url ?? "")) {
         try {
@@ -349,11 +353,16 @@ export async function startProxy({
                     model: modelForTier(claudeModels([...catalog.values()]), "haiku"),
                   })
                 : null;
+              // Trailing system entries are dropped from the count: Claude Code resends a 400'd first
+              // request with them folded into the user turn, and that must still count as a retry.
+              capability = capabilities?.prepare({ prompt, conversationId: key, sessionId: sessionOf(body) || null,
+                messageCount: body.messages.filter((m) => m?.role !== "system").length }) ?? null;
               const jev = await tasks.route({
                 taskKey: key,
                 taskHistory: body.messages.filter(m => m.role === "user").map(m => newTurnPrompt({ ...body, messages: [m] })).filter(Boolean),
                 prompt: withImageDescriptions(prompt, images.length, descriptions), current: currentModel, currentEffort: state.effort ?? body.output_config?.effort,
                 contextTokens, models, efforts: CLAUDE_EFFORTS,
+                ...(capability?.questions ? { capabilityQuestions: capability.questions } : {}),
               });
               const chosen = models.find((model) => model.id === jev?.choice);
               const tierAnswer = jev && { ...jev, choice: chosen?.tier };
@@ -373,6 +382,9 @@ export async function startProxy({
               state.tier = tier;
               state.model = model;
               state.effort = claudeEffort(tier, jev?.effort, state.effort ?? body.output_config?.effort);
+              const capabilityResult = capabilities?.finalize(capability, { jev, taskId: tasks.taskIdFor(key), taskType: jev?.taskContext?.taskType ?? null,
+                model, effort: state.effort, modelReason: reason }) ?? { notice: "" };
+              state.capabilityNotice = capabilityResult.notice;
               fresh = {
                 prompt,
                 model,
@@ -384,6 +396,8 @@ export async function startProxy({
                 reason,
                 evidence: jev?.evidence ?? null,
                 checkpoint: jev?.checkpoint ?? null,
+                capabilities: capabilityResult.decision ?? null,
+                requestId: capability?.requestId ?? null,
                 jev: jev ? { request: jev.request, response: jev.response } : null,
               };
               debug(
@@ -396,13 +410,18 @@ export async function startProxy({
             const tier = state.tier ?? current;
             const model = state.model ?? idOf(tier);
             debug(`${key} rewrite ${body.model} -> ${model}`);
+            if (capabilities) {
+              capabilities.observe(body, key);
+              const injected = capabilities.inject(body, key);
+              if (injected) debug(`${key} capability injection on ${injected} message(s)`);
+            }
             applyTier(body, tier, model);
             if (state.effort) {
               body.output_config ??= {};
               body.output_config.effort = state.effort;
             }
             tasks.assertModel({ taskKey: key, model, effort: state.effort });
-            if (fresh) state.notice = routingNotice({ model, effort: state.effort, confidence: fresh.confidence, reason: fresh.reason });
+            if (fresh) state.notice = routingNotice({ model, effort: state.effort, confidence: fresh.confidence, reason: fresh.reason, capabilities: state.capabilityNotice });
             notice = state.notice;
             // Publish what went out. Claude Code's UI shows the row you picked, not the tier
             // it resolved to, so the status line is the only place this is visible.
@@ -416,6 +435,8 @@ export async function startProxy({
           }
           out = Buffer.from(JSON.stringify(body));
         } catch (err) {
+          capabilities?.fail(capability, err?.routingHold ? "routing-hold" : "routing", err);
+          capability = null;
           if (sendRoutingHold(res, err)) return;
           debug(`passthrough, could not process body: ${err.message}`);
         }
@@ -468,6 +489,23 @@ export async function startProxy({
           const responseHeaders = showNotice ? { ...up.headers } : up.headers;
           if (showNotice) delete responseHeaders["content-length"];
           res.writeHead(up.statusCode, responseHeaders);
+          if (capability) {
+            // Record the model the API reports, so selection and actual service can differ visibly.
+            const requestId = capability.requestId;
+            if (up.statusCode < 200 || up.statusCode >= 300) capabilities.served(requestId, { status: up.statusCode });
+            else {
+              let text = "";
+              const onData = (chunk) => {
+                text += chunk.toString("utf8");
+                const m = /"model"\s*:\s*"([^"]+)"/.exec(text);
+                if (!m && text.length < 8192) return;
+                up.off("data", onData);
+                capabilities.served(requestId, { status: up.statusCode, model: m?.[1] ?? null });
+              };
+              if (up.headers["content-encoding"]) capabilities.served(requestId, { status: up.statusCode, model: null });
+              else up.on("data", onData);
+            }
+          }
           // Report the model the API itself says it used, so the routing can be confirmed
           // from the wire rather than trusted from our own decision log. Claude Code's UI
           // always shows the model it asked for, never the one we rewrote to.

@@ -36,6 +36,7 @@
     "docs/routing-policy.json",
     "docs/improvement-harness.md",
     "docs/execution-safeguards.md",
+    "docs/capability-routing.md",
     "README.md"
   ],
   "keywords": [
