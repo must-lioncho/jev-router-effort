@@ -71,7 +71,7 @@ I ran two mutation checks: retry detection disabled, and the idempotency guard r
 
    These are smoke expectations, not ground-truth labels.
    - In two runs the agent answer for the JD prompt changed from `jev-none` (0.35) to `low-confidence`. Both runs ended with no agent.
-   - For `/hr-pip`, JEV also selected the agent `mustcompany-team-hr-pip-hr-zero-task` (0.91). Nobody has reviewed whether that agent is appropriate.
+   - For `/hr-pip`, JEV also selected the agent `<org>-team-hr-pip-hr-zero-task` (0.91). Nobody has reviewed whether that agent is appropriate.
 2. **Cost against model-only routing.** Same prompt, 5 cases where the capability questions were asked:
    - Median JEV input tokens went from 1,240 to 2,048. The largest case went from 1,250 to 2,374.
    - Median latency was 318 ms model-only and 288 ms with capability questions. The model-only call always ran first, n is 5 and the order was not randomized, so this does not show a latency difference in either direction.
