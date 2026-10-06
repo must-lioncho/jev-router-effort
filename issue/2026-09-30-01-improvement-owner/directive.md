@@ -4,7 +4,7 @@ Owner of this issue: the agent definition worker (Orca task `task_fd1c8f747b30`)
 
 ## Owned files
 
-AIOS development repository `/Users/lioncho/Work/lion_work/organization/mustcompany/workspace/mustcompany-aios`:
+AIOS development repository `<aios-repo>`:
 
 - `sources/agents/jev-router-improver.md`
 - `sources/agents/jev-claude-executor.md`

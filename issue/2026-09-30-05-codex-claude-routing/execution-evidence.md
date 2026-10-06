@@ -1,6 +1,6 @@
 # Native implementation launch and availability
 
-The coordinator read `orca skills get orca-cli` from /usr/local/bin/orca; local runtime 1.4.210 was reachable. The same checkout was resolved as c6504843-8713-46e3-9ef5-b0ee7f856323::/Users/lioncho/Work/lion_personal/jev-router. No worktree was created.
+The coordinator read `orca skills get orca-cli` from /usr/local/bin/orca; local runtime 1.4.210 was reachable. The same checkout was resolved as c6504843-8713-46e3-9ef5-b0ee7f856323::<jev-router checkout>. No worktree was created.
 
 Implementation owner launch: `claude --agent jev-router-improver --model claude-opus-5-5`, terminal term_78aa9eee-7917-4e70-b86a-be13a8c28c3a. Native banner reported Claude Code 2.1.285, Opus 5.5 with low effort. Orca readiness satisfied. Prompt receipt f02541b5-4514-426c-bbb7-0c033c512d30 reported accepted:true and stages input_accepted, turn_started. These prove delivery/start, not implementation success.
 

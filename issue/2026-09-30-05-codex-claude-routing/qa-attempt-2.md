@@ -46,7 +46,7 @@ Read-only Orca terminal show/read now report orphaned=true, connected=false, wri
 
 From retained resume metadata, QA inspected the corresponding private local native session without copying its path, session identifier or transcript into Git. Model attachment names exact claude-sonnet-5-5. There is exactly one assistant record, a synthetic API error: `You've hit your weekly limit · resets Oct 1 at 7:30pm (Asia/Calcutta)`, error rate_limit, HTTP 429, quota status rejected. Launch used default effort; session error metadata records perTurnEffort="medium". There is no successful model inference or arithmetic completion. Tool duration/modified-line totals are zero; modelUsage is empty. This independently supports the failed R5 result.
 
-Directly read /Users/lioncho/.config/jev-router/runtime.json: enabled/checkpoint/handoff remain true, candidates/catalog empty and preference absent. R8 remains incomplete. No account, quota reset or paid-credit action was used to bypass the failure.
+Directly read ~/.config/jev-router/runtime.json: enabled/checkpoint/handoff remain true, candidates/catalog empty and preference absent. R8 remains incomplete. No account, quota reset or paid-credit action was used to bypass the failure.
 
 ## Final action
 

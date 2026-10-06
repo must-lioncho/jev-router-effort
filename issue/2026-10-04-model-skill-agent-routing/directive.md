@@ -4,7 +4,7 @@
 
 ## 실행 환경과 보호
 
-- 작업 폴더: /Users/lioncho/Work/lion_personal/jev-router
+- 작업 폴더: <jev-router checkout>
 - 실행: native Claude Code, jev-router-improver, claude-opus-5-5, 기본 effort. 실제 모델·effort는 결과에 기록한다.
 - 체크포인트 commit: 6b9385eb44338f57c987276e980286131c90b776
 - 체크포인트 ref: refs/jev/checkpoints/2026-10-04-model-skill-agent-routing/20261004T112604782Z-6b9385eb4433
