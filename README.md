@@ -108,13 +108,13 @@ Each fresh decision is the first line of the answer. It appears as soon as Jev d
 (about 0.5 s), before the model's first token, which can take much longer:
 
 ```text
-[Jev] routed this turn to gemini-3.1-pro-low (jev, confidence 0.32).
+[Jev] routed this turn to gemini-4-argon-low (jev, confidence 0.32).
 ```
 
-Jev chooses among the exact Gemini IDs in the signed-in account's agent picker, such as
-`gemini-3.8-flash-low`, `gemini-3.1-pro-low`, or `gemini-pro-agent`. AGY routing currently
-covers Gemini models only: Claude is excluded because Claude through AGY rejects replayed
-thinking parts that lack signatures.
+Jev chooses only **Gemini 3.8 Flash** and **Gemini 4 Argon** from the signed-in account's
+agent picker (`gemini-3.8-flash-{low,medium,high}` and
+`gemini-4-argon-{low,medium,high}`). Older Gemini models, Claude and GPT-OSS are excluded
+from automatic routing. Explicit native model selections remain manual overrides.
 AGY encodes the thinking level in the ID (`-low`, `-medium`, `-high`), so the chosen ID also
 sets the effort. Tool continuations keep the turn's model. Jev's notes are removed from the
 conversation history before each request, so the model never reads them.

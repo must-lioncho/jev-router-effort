@@ -232,7 +232,7 @@ test('runtime creates a real checkpoint with an unchanged branch and user index'
 for (const cli of ['claude', 'codex', 'antigravity', 'glm']) test(`${cli} adapter never forwards a held request`, async t => {
   let generation = 0;
   const catalog = cli === 'codex' ? { models: [{ slug: 'gpt-6-sol', supported_in_api: true, supported_reasoning_levels: [{ effort: 'high' }] }] }
-    : { models: { 'gemini-pro-agent': { displayName: 'Pro' } }, defaultAgentModelId: 'gemini-pro-agent' };
+    : { models: { 'gemini-4-argon-medium': { displayName: 'Gemini 4 Argon' } }, defaultAgentModelId: 'gemini-4-argon-medium' };
   const upstream = http.createServer((req, res) => {
     req.resume(); req.on('end', () => {
       if (/models|fetchAvailableModels/.test(req.url)) return res.end(JSON.stringify(catalog));

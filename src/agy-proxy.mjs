@@ -19,11 +19,11 @@ export const AGY_AUTO_MODEL = "jev-router";
 // next request so the model never reads Jev's notes as its own output.
 const NOTE = /\[Jev\] (?:routed this turn to|unavailable;)[^\n]*\n\n/g;
 
-// Only Gemini is routed: Claude through AGY rejects replayed thinking parts without a signature.
+// Only the two approved Gemini families are routed. Manual native choices stay untouched.
 export function agyTierOf(id) {
   if (typeof id !== "string") return null;
-  if (/^gemini-[\w.-]*flash-(?:extra-low|low|medium|high)$/.test(id)) return "haiku";
-  if (/^gemini-[\w.-]*pro-(?:low|medium|high|agent)$/.test(id) || id === "gemini-pro-agent") return "opus";
+  if (/^gemini-3\.8-flash-(?:low|medium|high)$/.test(id)) return "haiku";
+  if (/^gemini-4-argon-(?:low|medium|high)$/.test(id)) return "opus";
   return null;
 }
 
