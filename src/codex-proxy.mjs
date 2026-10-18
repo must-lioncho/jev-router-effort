@@ -5,7 +5,7 @@ import { writeFileSync } from "node:fs";
 import { availableTiers, shouldUseExactModel } from "./config.mjs";
 import { askJev, warmJev } from "./router.mjs";
 import { decide } from "./policy.mjs";
-import { createTaskRuntime, sendRoutingHold } from "./task-runtime.mjs";
+import { checkpointWarning, createTaskRuntime, sendRoutingHold } from "./task-runtime.mjs";
 import { createCapabilityRuntime } from "./capability-runtime.mjs";
 import { log } from "./log.mjs";
 import { writeDecision, writeStatus } from "./status.mjs";
@@ -270,7 +270,7 @@ export const upstreamFor = (
   apiBaseURL = API_BASE_URL,
 ) => /\/models(?:\?|$)/.test(path) || headers["chatgpt-account-id"] ? chatgptBaseURL : apiBaseURL;
 
-export function jevDecisionEvents({ tier, model = codexModelOf(tier), effort, effortMode, confidence, effortConfidence, reason, capabilities = "" }) {
+export function jevDecisionEvents({ tier, model = codexModelOf(tier), effort, effortMode, confidence, effortConfidence, reason, capabilities = "", checkpoint = null }) {
   const detail = confidence == null ? reason : `${reason}, confidence ${confidence.toFixed(2)}`;
   const effortDetail = effort
     ? effortMode === CODEX_AUTO_EFFORT
@@ -280,7 +280,7 @@ export function jevDecisionEvents({ tier, model = codexModelOf(tier), effort, ef
   const id = `jev-${randomUUID()}`;
   const text = reason.startsWith("jev-unavailable")
     ? `[Jev] unavailable; using ${model}. Add JEV_API_KEY=... to ~/.jev-router.env and restart jev-codex.`
-    : `[Jev] routed this turn to ${model} (${detail}${effortDetail}).${capabilities ? ` ${capabilities}.` : ""}`;
+    : `[Jev] routed this turn to ${model} (${detail}${effortDetail}).${capabilities ? ` ${capabilities}.` : ""}${checkpointWarning(checkpoint)}`;
   const item = {
     type: "message",
     role: "assistant",

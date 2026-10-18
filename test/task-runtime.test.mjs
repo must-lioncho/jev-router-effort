@@ -285,3 +285,29 @@ for (const cli of ['claude', 'codex', 'antigravity']) test(`${cli} manual model 
   assert.equal(res.status, 409);
   assert.equal(generation, 0);
 });
+
+test('checkpoint failure: hold by default, opt-in warn continues locally and the note says so', async t => {
+  const fail = async () => { throw Object.assign(new Error('git add failed: fatal: unable to stat'), { code: 'add_failed' }); };
+  const { runtime: held } = fixture(t, { config: { checkpoint: true }, checkpoint: fail });
+  await assert.rejects(held.route({ prompt: original, models }),
+    err => err.routingHold && /Checkpoint required/.test(err.message) && /onFailure/.test(err.message));
+  const { runtime: warned } = fixture(t, { config: { checkpoint: true, checkpointOptions: { onFailure: 'warn' } }, checkpoint: fail });
+  const result = await warned.route({ prompt: original, models });
+  assert.equal(result.checkpoint.ok, false);
+  assert.equal(result.checkpoint.code, 'add_failed');
+  const { routingNotice } = await import('../src/proxy.mjs');
+  const note = routingNotice({ model: 'cheap', effort: 'low', confidence: 0.8, reason: 'jev', checkpoint: result.checkpoint });
+  assert.match(note, /^\[Jev\] routed this turn to cheap .*Checkpoint FAILED, no recovery point for this turn: git add failed/);
+  assert.ok(!note.includes('\n'), 'one line, so history stripping removes it with the note');
+  assert.doesNotMatch(routingNotice({ model: 'cheap', reason: 'jev', checkpoint: { ok: true } }), /Checkpoint/);
+  const { jevDecisionEvents } = await import('../src/codex-proxy.mjs');
+  assert.match(jevDecisionEvents({ model: 'm', reason: 'jev', checkpoint: result.checkpoint }), /Checkpoint FAILED/);
+});
+
+test('warn mode never lets a handoff proceed without a checkpoint', async t => {
+  const { runtime } = fixture(t, { policy: { ...policy, rules: [{ ...rule, cli: 'codex' }] },
+    config: { checkpoint: true, handoff: true, checkpointOptions: { onFailure: 'warn' }, externalModels: [{ cli: 'codex', id: 'strong-v1', efforts: ['high'] }] },
+    checkpoint: async () => { throw new Error('locked'); },
+    handoff: async () => { throw new Error('handoff must not run'); } });
+  await assert.rejects(runtime.route({ prompt: original, models }), err => err.routingHold && /Checkpoint required/.test(err.message));
+});

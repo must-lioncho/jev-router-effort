@@ -121,7 +121,18 @@ export function createTaskRuntime({ cli, route, cwd = process.cwd(), workspaceEr
           maxFileBytes: options.maxFileBytes, cwd, taskId: task.id, reason: `JEV ${profile.taskType}: ${profile.signals.join(', ')}` });
         if (!task.checkpoint?.ok || !task.checkpoint.commit || !task.checkpoint.ref) throw new Error('Incomplete checkpoint receipt');
         save(fileFor(taskKey), task);
-      } catch (err) { throw new RoutingHoldError(`Checkpoint required before execution: ${err.message}`); }
+      } catch (err) {
+        // Intend.md item 5: a required checkpoint that cannot be made holds execution. The
+        // user may opt out for local execution only (checkpointOptions.onFailure = "warn");
+        // a handoff always needs a receipt.
+        if ((config.checkpointOptions?.onFailure ?? 'hold') === 'warn' && !willDelegate) {
+          task.checkpoint = { ok: false, error: err.message, code: err.code ?? null, at: now() };
+          save(fileFor(taskKey), task);
+        } else {
+          throw new RoutingHoldError(`Checkpoint required before execution: ${err.message}` +
+            (willDelegate ? '' : ' To continue without one, set checkpointOptions.onFailure to "warn" in the runtime config.'));
+        }
+      }
     }
     const override = detectOverride(input.prompt);
     if (!override && choice.kind === 'local') {
@@ -203,6 +214,12 @@ export function createTaskRuntime({ cli, route, cwd = process.cwd(), workspaceEr
       return pending;
     },
   };
+}
+
+/** Suffix for the per-turn note when warn mode let a turn run without its checkpoint. */
+export function checkpointWarning(checkpoint) {
+  if (checkpoint?.ok !== false) return '';
+  return ` Checkpoint FAILED, no recovery point for this turn: ${String(checkpoint.error ?? 'unknown error').replace(/\s+/g, ' ').slice(0, 200)}`;
 }
 
 export function sendRoutingHold(res, error) {

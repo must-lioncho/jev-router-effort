@@ -15,7 +15,7 @@ import {
 } from "./config.mjs";
 import { askJev, warmJev } from "./router.mjs";
 import { decide } from "./policy.mjs";
-import { createTaskRuntime, sendRoutingHold } from "./task-runtime.mjs";
+import { checkpointWarning, createTaskRuntime, sendRoutingHold } from "./task-runtime.mjs";
 import { createCapabilityRuntime } from "./capability-runtime.mjs";
 import { log } from "./log.mjs";
 import { writeDecision, writeStatus } from "./status.mjs";
@@ -41,11 +41,12 @@ export function claudeEffort(tier, recommended, previous) {
     : CLAUDE_MANUAL_EFFORTS.includes(previous) ? previous : null;
 }
 
-export function routingNotice({ model, effort, confidence, reason, capabilities = "" }) {
+export function routingNotice({ model, effort, confidence, reason, capabilities = "", checkpoint = null }) {
   const detail = confidence == null ? reason : `${reason}, confidence ${confidence.toFixed(2)}`;
   const effortDetail = effort ? `effort auto → ${effort}`
     : tierSpec(tierOf(model))?.effort === false ? "effort n/a" : "effort unset";
-  return `[Jev] routed this turn to ${model} (${detail}, ${effortDetail}).${capabilities ? ` ${capabilities}.` : ""}`;
+  // Same line as the note, so history stripping removes it with the note.
+  return `[Jev] routed this turn to ${model} (${detail}, ${effortDetail}).${capabilities ? ` ${capabilities}.` : ""}${checkpointWarning(checkpoint)}`;
 }
 
 // A note, real or imitated, is one whole line; the capabilities sentence shares that line.
@@ -457,7 +458,7 @@ export async function startProxy({
               body.output_config.effort = state.effort;
             }
             tasks.assertModel({ taskKey: key, model, effort: state.effort });
-            if (fresh) state.notice = routingNotice({ model, effort: state.effort, confidence: fresh.confidence, reason: fresh.reason, capabilities: state.capabilityNotice });
+            if (fresh) state.notice = routingNotice({ model, effort: state.effort, confidence: fresh.confidence, reason: fresh.reason, capabilities: state.capabilityNotice, checkpoint: fresh.checkpoint });
             notice = state.notice;
             // Publish what went out. Claude Code's UI shows the row you picked, not the tier
             // it resolved to, so the status line is the only place this is visible.
