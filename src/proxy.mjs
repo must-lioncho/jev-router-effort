@@ -48,6 +48,41 @@ export function routingNotice({ model, effort, confidence, reason, capabilities 
   return `[Jev] routed this turn to ${model} (${detail}, ${effortDetail}).${capabilities ? ` ${capabilities}.` : ""}`;
 }
 
+// A note, real or imitated, is one whole line; the capabilities sentence shares that line.
+const LEADING_NOTES = /^(?:[ \t]*\[Jev\] (?:routed this turn to |unavailable;)[^\n]*(?:\n|$)(?:[ \t]*\n)*)+/;
+
+/**
+ * Removes Jev's notes from the start of assistant text in history. Returns the same body.
+ *
+ * Claude Code stores the note as part of the reply and sends it back on every request.
+ * A model that sees its past turns open with `[Jev] ...` lines starts writing them itself,
+ * so the stack grows each turn. Only leading note lines go; tool, thinking and user
+ * content are untouched. A block or message left empty is dropped.
+ */
+export function stripClaudeNotes(body) {
+  if (!Array.isArray(body?.messages)) return body;
+  body.messages = body.messages.flatMap((message) => {
+    if (message?.role !== "assistant") return [message];
+    if (typeof message.content === "string") {
+      if (!message.content.includes("[Jev] ")) return [message];
+      const content = message.content.replace(LEADING_NOTES, "");
+      return content ? [{ ...message, content }] : [];
+    }
+    if (!Array.isArray(message.content)) return [message];
+    let changed = false;
+    const content = message.content.flatMap((block) => {
+      if (block?.type !== "text" || typeof block.text !== "string" || !block.text.includes("[Jev] ")) return [block];
+      const text = block.text.replace(LEADING_NOTES, "");
+      if (text === block.text) return [block];
+      changed = true;
+      return text ? [{ ...block, text }] : [];
+    });
+    if (!changed) return [message];
+    return content.length ? [{ ...message, content }] : [];
+  });
+  return body;
+}
+
 /** Prefix the first real text delta so Claude Code's UI renders the decision. */
 export function prependRoutingNotice(notice, onInserted = () => {}) {
   const decoder = new StringDecoder("utf8");
@@ -317,6 +352,7 @@ export async function startProxy({
             writeFileSync(`${process.env.JEV_DUMP}.${Date.now()}.json`, JSON.stringify(body, null, 2));
           }
           body.tools?.forEach((t) => sanitizeSchema(t.input_schema));
+          stripClaudeNotes(body);
           if (Array.isArray(body.tools)) tasks.assertLocal(conversationKey(body));
 
           // Anything that is not the sentinel is a model the user chose, and an explicit
