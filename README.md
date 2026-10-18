@@ -333,6 +333,7 @@ sub-agents are pinned separately. Routing is fail-open: Jev failure never blocks
 | Variable | Interface | Effect |
 | --- | --- | --- |
 | `JEV_API_KEY` | All | Enables routing. `TYPESAFE_API_KEY` also works. |
+| `JEV_REQUIRE` | All | With `1`, exit with code 3 instead of starting unrouted when no key is found. |
 | `JEV_ALLOW_FABLE` | All | Enables the opt-in long tier. |
 | `JEV_DEBUG` | All | Logs decisions and rewrites to `~/.jev-claude.log` in interactive sessions. |
 | `JEV_DUMP` | All | Dumps request bodies for debugging wire-format changes. |
@@ -343,7 +344,10 @@ sub-agents are pinned separately. Routing is fail-open: Jev failure never blocks
 | `JEV_CODEX_LONG_MODEL` | Codex | Long model; defaults to `gpt-6-astra`. |
 
 Existing environment variables have highest precedence, followed by `.env` in the launch
-directory, `~/.jev-router.env`, and the legacy `~/.jev-claude.env`.
+directory, `~/.jev-router.env`, the legacy `~/.jev-claude.env`, and on macOS the Keychain item
+`typesafe-ai-api` (`security find-generic-password -s typesafe-ai-api -w`), so launchers exec'd
+by scripts or terminal managers still route. Without a key, every launcher prints a multi-line
+`JEV ROUTER OFF` warning and the Claude status line shows `Jev Router OFF: no key`.
 
 Tier definitions, Jev's question, confidence thresholds, and timeouts live in `src/config.mjs`.
 Both launchers send Jev the exact models in the signed-in account's native catalog, so model
