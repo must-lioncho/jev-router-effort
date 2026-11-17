@@ -256,6 +256,9 @@ may also remove them during normal temporary-file cleanup.
 ![Jev Router in the OpenAI Codex model picker](docs/codex-model-picker.png)
 
 `jev-codex` launches Codex with a temporary **Jev Router** provider and selects `jev-router`.
+It starts in standard speed with Auto reasoning. Choose **Jev Router Ultrafast**
+in `/model` (or launch with `jev-codex --model jev-router-ultrafast`) to opt in.
+That entry appears only when the account catalog has an eligible Ultrafast model.
 The native `/model` picker still contains the models available to the account. Selecting a
 concrete model pauses routing; selecting **Jev Router** resumes it.
 

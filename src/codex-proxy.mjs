@@ -24,6 +24,9 @@ import {
 const CHATGPT_BASE_URL = "https://chatgpt.com/backend-api/codex";
 const API_BASE_URL = "https://api.openai.com/v1";
 export const CODEX_AUTO_MODEL = "jev-router";
+export const CODEX_ULTRAFAST_MODEL = "jev-router-ultrafast";
+const ULTRAFAST = "ultrafast";
+export const isCodexRouterModel = (model) => model === CODEX_AUTO_MODEL || model === CODEX_ULTRAFAST_MODEL;
 export const CODEX_AUTO_EFFORT = "auto";
 // The native picker also lists client modes such as Ultra (automatic delegation).
 // Those modes are not valid Responses API reasoning.effort values.
@@ -83,7 +86,7 @@ export function codexTierOf(model) {
 /** Only models reported by the account are eligible, including on cold start. */
 export function codexModels(models = new Map()) {
   const available = [...models.values()]
-    .filter((model) => model.slug !== CODEX_AUTO_MODEL && model.supported_in_api !== false)
+    .filter((model) => !isCodexRouterModel(model.slug) && model.supported_in_api !== false)
     .map((model) => {
       const efforts = apiEffortsOf(model);
       return {
@@ -262,7 +265,10 @@ export function addJevModel(catalog) {
       additionalSpeedTiers.push(tier);
     }
   }
-  catalog.models.unshift({
+  const ultrafastTemplate = catalog.models.find((model) =>
+    model.supported_in_api !== false && availableTiers().includes(codexTierOf(model.slug)) &&
+    serviceTierIdsOf(model).has(ULTRAFAST));
+  const auto = {
     ...template,
     slug: CODEX_AUTO_MODEL,
     display_name: "Jev Router",
@@ -276,9 +282,26 @@ export function addJevModel(catalog) {
       { effort: CODEX_AUTO_EFFORT, description: "Jev chooses the reasoning effort for each turn." },
       ...effortLevels,
     ],
-    service_tiers: serviceTiers,
-    additional_speed_tiers: additionalSpeedTiers,
-  });
+    default_service_tier: null,
+    service_tiers: serviceTiers.filter((tier) => tier.id !== ULTRAFAST),
+    additional_speed_tiers: additionalSpeedTiers.filter((tier) => tier !== ULTRAFAST),
+  };
+  const rows = [auto];
+  if (ultrafastTemplate) {
+    rows.push({
+      ...ultrafastTemplate,
+      slug: CODEX_ULTRAFAST_MODEL,
+      display_name: "Jev Router Ultrafast",
+      description: "Jev routes among models that support Ultrafast.",
+      visibility: "list",
+      supported_in_api: true,
+      priority: 1,
+      upgrade: null,
+      default_reasoning_level: CODEX_AUTO_EFFORT,
+      supported_reasoning_levels: auto.supported_reasoning_levels,
+    });
+  }
+  catalog.models.unshift(...rows);
   return catalog;
 }
 
@@ -382,7 +405,10 @@ export async function startCodexProxy({
           if (process.env.JEV_DUMP) {
             writeFileSync(`${process.env.JEV_DUMP}.${Date.now()}.json`, JSON.stringify(body, null, 2));
           }
-          if (body.model === CODEX_AUTO_MODEL) {
+          if (isCodexRouterModel(body.model)) {
+            const ultrafast = body.model === CODEX_ULTRAFAST_MODEL;
+            if (ultrafast) body.service_tier = ULTRAFAST;
+            else if (body.service_tier === ULTRAFAST) delete body.service_tier;
             // Codex may reuse its own catalog cache and never GET /models through us.
             // Fetch with this request's account credentials instead of inventing ids.
             if (!models.size) {
@@ -401,13 +427,16 @@ export async function startCodexProxy({
             tasks.assertLocal(key);
             const candidates = codexModels(models).filter((model) =>
               availableTiers().includes(model.tier) &&
+              (!ultrafast || serviceTierIdsOf(models.get(model.id)).has(ULTRAFAST)) &&
               // Keep the CLI's wire format: Lite bodies cannot safely be sent
               // to legacy models merely by removing the protocol header.
               (req.headers["x-openai-internal-codex-responses-lite"] === undefined ||
                 models.get(model.id)?.use_responses_lite === true),
             );
             const available = [...new Set(candidates.map((model) => model.tier))];
-            if (!candidates.length) throw new Error("No account models available for routing");
+            if (!candidates.length) throw new Error(ultrafast
+              ? "No compatible account models support Ultrafast; select Jev Router for standard speed"
+              : "No account models available for routing");
             const previousModel = states.get(key)?.model;
             const currentModel = candidates.some((model) => model.id === previousModel)
               ? previousModel : modelForTier(candidates, "opus");

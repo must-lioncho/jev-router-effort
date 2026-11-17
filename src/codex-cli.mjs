@@ -3,7 +3,7 @@ import { accessSync, constants, copyFileSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { CODEX_AUTO_EFFORT, CODEX_AUTO_MODEL, startCodexProxy } from "./codex-proxy.mjs";
+import { CODEX_AUTO_EFFORT, CODEX_AUTO_MODEL, isCodexRouterModel, startCodexProxy } from "./codex-proxy.mjs";
 import { executionWorkspace } from './execution-workspace.mjs';
 import { checkKey, loadJevKey } from "./credentials.mjs";
 
@@ -52,8 +52,8 @@ export const codexArgs = (baseURL, args) => {
     : inlineModel?.slice(inlineModel.indexOf("=") + 1);
   return [
   ...(selectedModel ? [] : ["--model", CODEX_AUTO_MODEL]),
-  ...(!selectedModel || selectedModel === CODEX_AUTO_MODEL
-    ? ["--config", `model_reasoning_effort="${CODEX_AUTO_EFFORT}"`]
+  ...(!selectedModel || isCodexRouterModel(selectedModel)
+    ? ["--config", `model_reasoning_effort="${CODEX_AUTO_EFFORT}"`, "--config", 'service_tier="default"']
     : []),
   "--config",
   `model_provider="${PROVIDER}"`,
