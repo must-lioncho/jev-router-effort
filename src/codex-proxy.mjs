@@ -1,7 +1,9 @@
 import http from "node:http";
 import https from "node:https";
 import { createHash, randomUUID } from "node:crypto";
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { availableTiers, shouldUseExactModel } from "./config.mjs";
 import { askJev, warmJev } from "./router.mjs";
 import { decide } from "./policy.mjs";
@@ -41,6 +43,29 @@ const MODEL_ENV = {
   opus: "JEV_CODEX_STRONG_MODEL",
   fable: "JEV_CODEX_LONG_MODEL",
 };
+
+/**
+ * Long-running Codex processes can keep sending the OAuth access token they
+ * started with after another Codex process refreshes auth.json. For ChatGPT
+ * accounts only, replace that stale bearer with the current token when the
+ * account id proves that the file belongs to the same account. Never use an
+ * API key from disk and never cross account boundaries.
+ */
+export function currentCodexHeaders(headers, authFile = join(process.env.CODEX_HOME ?? join(homedir(), ".codex"), "auth.json")) {
+  if (!headers?.["chatgpt-account-id"]) return headers;
+  try {
+    const auth = JSON.parse(readFileSync(authFile, "utf8"));
+    if (
+      auth.auth_mode !== "chatgpt" ||
+      auth.tokens?.account_id !== headers["chatgpt-account-id"] ||
+      typeof auth.tokens?.access_token !== "string" ||
+      !auth.tokens.access_token
+    ) return headers;
+    return { ...headers, authorization: `Bearer ${auth.tokens.access_token}` };
+  } catch {
+    return headers;
+  }
+}
 
 export const codexModelOf = (tier) => process.env[MODEL_ENV[tier]] ?? DEFAULT_MODELS[tier];
 
@@ -309,6 +334,7 @@ export async function startCodexProxy({
   runtimeConfig,
   checkpoint,
   handoff,
+  codexAuthFile,
   cwd = process.cwd(),
   workspaceError,
 } = {}) {
@@ -336,7 +362,7 @@ export async function startCodexProxy({
             // Codex may reuse its own catalog cache and never GET /models through us.
             // Fetch with this request's account credentials instead of inventing ids.
             if (!models.size) {
-              const headers = { ...req.headers };
+              const headers = currentCodexHeaders({ ...req.headers }, codexAuthFile);
               for (const name of ["host", "content-length", "connection", "content-type", "accept-encoding"]) delete headers[name];
               const clientVersion = req.headers["version"] ?? /codex[^/]*\/([\d.]+)/i.exec(req.headers["user-agent"] ?? "")?.[1] ?? "0.157.1";
               const response = await fetch(`${chatgptBaseURL}/models?client_version=${encodeURIComponent(clientVersion)}`, {
@@ -461,10 +487,11 @@ export async function startCodexProxy({
         }
       }
 
-      const base = upstreamFor(req.headers, req.url, chatgptBaseURL, apiBaseURL);
+      const requestHeaders = currentCodexHeaders(req.headers, codexAuthFile);
+      const base = upstreamFor(requestHeaders, req.url, chatgptBaseURL, apiBaseURL);
       const target = new URL(base);
       const transport = target.protocol === "http:" ? http : https;
-      const headers = { ...req.headers, host: target.host };
+      const headers = { ...requestHeaders, host: target.host };
       delete headers["content-length"];
       const upstream = transport.request(
         {

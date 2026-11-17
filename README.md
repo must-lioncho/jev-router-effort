@@ -282,8 +282,10 @@ fallback model and explains how to set `JEV_API_KEY`.
 
 ## How it works
 
-Each command starts a loopback proxy, launches the real CLI, and forwards the CLI's existing
-authorization headers without reading, storing, or modifying them.
+Each command starts a loopback proxy and launches the real CLI. Claude and AGY authorization
+headers are forwarded unchanged. For Codex ChatGPT login, the proxy may replace an expired
+bearer with the current token in `CODEX_HOME/auth.json`, but only when both account ids match;
+it never reads an API key or stores a copied credential.
 
 ```text
 you -> Claude Code -> jev-claude proxy -> Anthropic
