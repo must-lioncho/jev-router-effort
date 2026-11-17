@@ -31,6 +31,8 @@ const API_EFFORTS = new Set(["none", "minimal", "low", "medium", "high", "xhigh"
 const apiEffortsOf = (model) =>
   model?.supported_reasoning_levels?.map((level) => level.effort)
     .filter((effort) => API_EFFORTS.has(effort)) ?? [];
+const serviceTierIdsOf = (model) =>
+  new Set((model?.service_tiers ?? []).map((tier) => tier?.id).filter(Boolean));
 const DEFAULT_MODELS = {
   haiku: "gpt-5.6-luna",
   sonnet: "gpt-5.6-terra",
@@ -239,11 +241,25 @@ export function addJevModel(catalog) {
   if (!template) return catalog;
   const effortLevels = [];
   const seenEfforts = new Set();
+  const serviceTiers = [];
+  const seenServiceTiers = new Set();
+  const additionalSpeedTiers = [];
+  const seenSpeedTiers = new Set();
   for (const model of catalog.models) {
     for (const level of model.supported_reasoning_levels ?? []) {
       if (!level?.effort || seenEfforts.has(level.effort)) continue;
       seenEfforts.add(level.effort);
       effortLevels.push(level);
+    }
+    for (const tier of model.service_tiers ?? []) {
+      if (!tier?.id || seenServiceTiers.has(tier.id)) continue;
+      seenServiceTiers.add(tier.id);
+      serviceTiers.push(tier);
+    }
+    for (const tier of model.additional_speed_tiers ?? []) {
+      if (!tier || seenSpeedTiers.has(tier)) continue;
+      seenSpeedTiers.add(tier);
+      additionalSpeedTiers.push(tier);
     }
   }
   catalog.models.unshift({
@@ -260,6 +276,8 @@ export function addJevModel(catalog) {
       { effort: CODEX_AUTO_EFFORT, description: "Jev chooses the reasoning effort for each turn." },
       ...effortLevels,
     ],
+    service_tiers: serviceTiers,
+    additional_speed_tiers: additionalSpeedTiers,
   });
   return catalog;
 }
@@ -276,6 +294,12 @@ export function applyCodexTier(body, tier, models = new Map(), model = codexMode
     if (effort) body.reasoning.effort = effort;
     else delete body.reasoning.effort;
   }
+  if (
+    body.service_tier &&
+    body.service_tier !== "default" &&
+    info &&
+    !serviceTierIdsOf(info).has(body.service_tier)
+  ) delete body.service_tier;
   return body;
 }
 
