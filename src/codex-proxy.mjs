@@ -518,14 +518,26 @@ export async function startCodexProxy({
               writeDecision(statusId, routing);
               debug(`${key} ${current} -> ${tier} (${decision.reason}) | ${prompt.slice(0, 60)}`);
             }
+            // "auto" is a Jev-only level; upstream rejects it. Resolve it even when
+            // this request skipped routing (no new-turn prompt, no saved state).
+            if (!effort && effortMode === CODEX_AUTO_EFFORT) {
+              effort = effortForModel(candidates.find((candidate) => candidate.id === model), null, null);
+            }
             if (effort) {
               body.reasoning ??= {};
               body.reasoning.effort = effort;
+            } else if (body.reasoning?.effort === CODEX_AUTO_EFFORT) {
+              delete body.reasoning.effort;
             }
             capabilities?.inject(body, key);
             applyCodexTier(body, tier, models, model);
             tasks.assertModel({ taskKey: key, model, effort });
           } else {
+            // jev-codex defaults model_reasoning_effort to "auto", and chat pickers keep
+            // that effort after switching to a concrete model. Upstream rejects it.
+            if (body.reasoning?.effort && !API_EFFORTS.has(body.reasoning.effort)) {
+              applyCodexTier(body, null, models, body.model);
+            }
             const prompt = codexNewTurnPrompt(body);
             const explaining = prompt?.includes("<jev-explain>") || /^\$jev-explain\b/i.test(prompt ?? "");
             if (prompt && !explaining) writeStatus(statusId, { manual: true, at: Date.now() });
